@@ -60,3 +60,22 @@
 ### Remaining concerns
 
 - The migration lock is exercised by the production build's multi-worker startup and uses an immediate transaction. No separate timing-sensitive concurrency unit test was added because it would be flaky; foreign-key integrity and restart idempotence are covered deterministically.
+
+## Fix Round 2
+
+### Resolved index-rebuild regression
+
+- Rebuild paths now explicitly drop named indexes before renaming `project`, `message`, or `project_file` tables. This prevents an index name from remaining tied to the renamed legacy table and makes the later canonical index creation deterministic.
+- The existing post-rebuild index pass recreates all query indexes, including `project_file_active_path_idx` with its partial `WHERE deletedAt IS NULL` constraint.
+- Added direct stale-foreign-key child-table coverage that rebuilds `message`, `project_file`, and `project_runtime`, then asserts no foreign-key violations plus both message indexes, the project-file query index, and the partial unique active-path index. Legacy-rebuild coverage also asserts these indexes.
+
+### Exact verification outputs
+
+- `pnpm exec vitest run lib/db/migrations.test.ts lib/project-files.test.ts app/actions/projects.test.ts`: **3 test files passed, 16 tests passed**.
+- `pnpm run typecheck`: **passed**.
+- `pnpm run lint`: **passed**.
+- `pnpm run verify`: **passed** — typecheck and lint passed; Vitest reported **6 files / 36 tests passed**; Next production build completed; `pnpm audit --audit-level high` reported **No known vulnerabilities found**.
+
+### Fix Round 2 commit
+
+- `e1a25d2 fix: recreate indexes after SQLite table rebuilds`
