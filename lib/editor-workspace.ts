@@ -1,3 +1,7 @@
+import { htmlLanguage } from '@codemirror/lang-html'
+import { cssLanguage } from '@codemirror/lang-css'
+import { javascriptLanguage } from '@codemirror/lang-javascript'
+
 export type EditorLanguage = 'html' | 'css' | 'javascript' | 'json' | 'markdown' | 'typescript' | 'plain'
 
 export interface EditorFile {
@@ -243,28 +247,6 @@ export function diagnoseDocument(path: string, content: string): EditorDiagnosti
     }
   }
 
-  if (language === 'html') {
-    const voidElements = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'])
-    const stack: Array<{ name: string; offset: number }> = []
-    for (const match of content.matchAll(/<\/?([a-z][\w-]*)\b[^>]*>/gi)) {
-      const token = match[0]
-      const name = match[1].toLowerCase()
-      if (token.startsWith('</')) {
-        const open = stack.at(-1)
-        if (!open || open.name !== name) {
-          return [{ path, message: `Unexpected closing tag </${name}>; ${open ? `<${open.name}> is still open.` : 'no matching opening tag was found.'}`, ...locationFromOffset(content, match.index), severity: 'error' }]
-        }
-        stack.pop()
-      } else if (!token.endsWith('/>') && !voidElements.has(name) && !token.startsWith('<!')) {
-        stack.push({ name, offset: match.index })
-      }
-    }
-    const open = stack.at(-1)
-    return open
-      ? [{ path, message: `Unclosed tag <${open.name}>.`, ...locationFromOffset(content, open.offset), severity: 'error' }]
-      : []
-  }
-
   if (language === 'markdown') {
     const fences = [...content.matchAll(/^\s*```/gm)]
     if (fences.length % 2 === 1) {
@@ -274,31 +256,21 @@ export function diagnoseDocument(path: string, content: string): EditorDiagnosti
     return []
   }
 
-  if (language === 'css' || language === 'javascript' || language === 'typescript') {
-    const stack: Array<{ character: string; offset: number }> = []
-    const pairs: Record<string, string> = { '}': '{', ']': '[', ')': '(' }
-    let quote = ''
-    let lineComment = false
-    let blockComment = false
-    for (let index = 0; index < content.length; index += 1) {
-      const character = content[index]
-      const next = content[index + 1]
-      if (lineComment) { if (character === '\n') lineComment = false; continue }
-      if (blockComment) { if (character === '*' && next === '/') { blockComment = false; index += 1 }; continue }
-      if (quote) { if (character === '\\') { index += 1; continue }; if (character === quote) quote = ''; continue }
-      if ((language === 'javascript' || language === 'typescript') && character === '/' && next === '/') { lineComment = true; index += 1; continue }
-      if (character === '/' && next === '*') { blockComment = true; index += 1; continue }
-      if (character === '"' || character === "'" || character === '`') { quote = character; continue }
-      if (character === '{' || character === '[' || character === '(') stack.push({ character, offset: index })
-      if (pairs[character]) {
-        const open = stack.pop()
-        if (!open || open.character !== pairs[character]) return [{ path, message: `Unexpected ${character}.`, ...locationFromOffset(content, index), severity: 'error' }]
-      }
-    }
-    const open = stack.at(-1)
-    if (open) return [{ path, message: `Unclosed ${open.character}.`, ...locationFromOffset(content, open.offset), severity: 'error' }]
-    if (quote) return [{ path, message: 'Unclosed string literal.', ...locationFromOffset(content, content.length), severity: 'error' }]
-    if (blockComment) return [{ path, message: 'Unclosed block comment.', ...locationFromOffset(content, content.length), severity: 'error' }]
+  const parser = language === 'html' ? htmlLanguage.parser
+    : language === 'css' ? cssLanguage.parser
+      : language === 'javascript' ? javascriptLanguage.parser.configure({ dialect: path.toLowerCase().endsWith('x') ? 'jsx' : '' })
+        : language === 'typescript' ? javascriptLanguage.parser.configure({ dialect: path.toLowerCase().endsWith('x') ? 'ts jsx' : 'ts' })
+          : null
+  if (parser) {
+    const diagnostics: EditorDiagnostic[] = []
+    const cursor = parser.parse(content).cursor()
+    do {
+      if (!cursor.type.isError) continue
+      const offset = cursor.from
+      const snippet = content.slice(Math.max(0, offset - 32), Math.min(content.length, Math.max(cursor.to, offset + 1) + 32)).replace(/\s+/g, ' ').trim()
+      diagnostics.push({ path, message: `${language.toUpperCase()} syntax error${snippet ? ` near “${snippet}”` : ''}.`, ...locationFromOffset(content, offset), severity: 'error' })
+    } while (cursor.next())
+    return diagnostics
   }
 
   return []

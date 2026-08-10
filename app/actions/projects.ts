@@ -241,9 +241,8 @@ function deriveName(prompt: string): string {
 
 export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
   const userId = await getUserId()
-  const { prompt, model, currentHtml, context } = input
+  const { prompt, model, context } = input
   const safePrompt = redactSensitiveValues(prompt)
-  const safeCurrentHtml = currentHtml ? redactSensitiveValues(currentHtml) : null
   const safeContextBlock = redactSensitiveValues(buildContextBlock(context))
 
   // Ensure a project exists (scoped to this user).
@@ -260,6 +259,16 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
     projectName = existingProject.name
   }
 
+  // Capture the configured entry and its optimistic version before generation.
+  // The model call can be long-running, so the final write must fail if an
+  // editor save changes this exact file while generation is in flight.
+  const runtime = await projects.getRuntime(userId, projectId)
+  if (!runtime) throw new Error('Project runtime is unavailable.')
+  const entry = await projects.getFileByPath(userId, projectId, runtime.entryPath)
+  if (!entry) throw new Error('Project entry file is unavailable.')
+  const expectedUpdatedAt = entry.updatedAt
+  const safeCurrentHtml = input.currentHtml ? redactSensitiveValues(entry.content) : null
+
   // Persist the user's message immediately.
   await db.insert(message).values({
     id: id(),
@@ -274,7 +283,7 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
     ? `Here is the current app HTML:\n\n${safeCurrentHtml}\n\n---\n\nApply this change and return the full updated HTML document:\n${safePrompt}${safeContextBlock}`
     : `Build this app and return a complete HTML document:\n${safePrompt}${safeContextBlock}`
 
-  let html = currentHtml ?? ''
+  let html = entry.content
   try {
     const { text } = await generateText({
       model: resolveModel(model),
@@ -294,14 +303,12 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
     throw new Error('Generation failed. Check your server-side AI provider configuration and try again.')
   }
 
-  const reply = currentHtml
+  const reply = input.currentHtml
     ? 'Done — I applied your change and refreshed the live preview.'
     : 'Here is your app. It is rendering live in the preview — describe any change to refine it.'
 
   // Persist the generated app + assistant reply.
-  const index = await projects.getFileByPath(userId, projectId, 'index.html')
-  if (!index) throw new Error('Project starter file is unavailable.')
-  const updatedIndex = await projects.updateFile(userId, projectId, index.id, { content: html })
+  const updatedEntry = await projects.updateFile(userId, projectId, entry.id, { content: html, expectedUpdatedAt })
 
   await db.insert(message).values({
     id: id(),
@@ -311,7 +318,7 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
     content: reply,
   })
 
-  return { projectId, name: projectName, html, reply, version: updatedIndex.updatedAt.getTime() }
+  return { projectId, name: projectName, html, reply, version: updatedEntry.updatedAt.getTime() }
 }
 
 function stripFences(text: string): string {

@@ -948,6 +948,7 @@ export default function App({ initial }: LotusBuilderProps) {
           {projectId
             ? <div className={view === "code" ? "flex min-h-0 flex-1" : "hidden"} aria-hidden={view !== "code"}>
               <EditorWorkspace
+                active={view === "code"}
                 projectId={projectId}
                 files={builderFiles}
                 entryPath={entryPath}

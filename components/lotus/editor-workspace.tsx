@@ -31,6 +31,7 @@ import {
 } from '@/lib/editor-workspace'
 
 interface EditorWorkspaceProps {
+  active?: boolean
   projectId: string
   files: EditorFile[]
   entryPath: string
@@ -75,13 +76,14 @@ function persisted(projectId: string): PersistedEditorState {
   }
 }
 
-export function EditorWorkspace({ projectId, files: initialFiles, entryPath, initialFontSize, onPreviewChange, onFilesChange, onEntryPathChange }: EditorWorkspaceProps) {
+export function EditorWorkspace({ active: workspaceActive = true, projectId, files: initialFiles, entryPath, initialFontSize, onPreviewChange, onFilesChange, onEntryPathChange }: EditorWorkspaceProps) {
   const [files, setFiles] = useState(initialFiles)
   const [lastInitialFiles, setLastInitialFiles] = useState(initialFiles)
   const [session, setSession] = useState(() => createEditorSession(initialFiles, projectId, { ...persisted(projectId), fontSize: persisted(projectId).fontSize ?? initialFontSize }))
   const [currentEntryPath, setCurrentEntryPath] = useState(entryPath)
   const [lastEntryPath, setLastEntryPath] = useState(entryPath)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [lastWorkspaceActive, setLastWorkspaceActive] = useState(workspaceActive)
   const [problemsOpen, setProblemsOpen] = useState(true)
   const [operationHistory, setOperationHistory] = useState<ProjectOperation[]>([])
   const [operationIndex, setOperationIndex] = useState(-1)
@@ -102,6 +104,10 @@ export function EditorWorkspace({ projectId, files: initialFiles, entryPath, ini
     setLastEntryPath(entryPath)
     setCurrentEntryPath(entryPath)
   }
+  if (lastWorkspaceActive !== workspaceActive) {
+    setLastWorkspaceActive(workspaceActive)
+    if (!workspaceActive) setPaletteOpen(false)
+  }
 
   const active = session.activeFileId ? session.documents[session.activeFileId] : null
   const diagnostics = useMemo(() => {
@@ -113,6 +119,9 @@ export function EditorWorkspace({ projectId, files: initialFiles, entryPath, ini
   }, [currentEntryPath, session.documents])
   const preview = useMemo(() => buildPreviewDocument(Object.values(session.documents), currentEntryPath), [currentEntryPath, session.documents])
   const visibleFiles = useMemo(() => Object.values(session.documents).sort((a, b) => a.path.localeCompare(b.path)), [session.documents])
+  const effectiveTreeFocusId = visibleFiles.some((file) => file.id === treeFocusId)
+    ? treeFocusId
+    : visibleFiles.some((file) => file.id === active?.id) ? active?.id ?? null : visibleFiles[0]?.id ?? null
 
   useEffect(() => { onPreviewChangeRef.current = onPreviewChange }, [onPreviewChange])
   useEffect(() => onPreviewChangeRef.current(preview), [preview])
@@ -177,6 +186,7 @@ export function EditorWorkspace({ projectId, files: initialFiles, entryPath, ini
   }, [active, currentEntryPath, files, onFilesChange, onPreviewChange, projectId])
 
   useEffect(() => {
+    if (!workspaceActive) return
     const keyboard = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'p') {
         event.preventDefault()
@@ -191,7 +201,7 @@ export function EditorWorkspace({ projectId, files: initialFiles, entryPath, ini
     }
     window.addEventListener('keydown', keyboard)
     return () => window.removeEventListener('keydown', keyboard)
-  }, [saveActive])
+  }, [saveActive, workspaceActive])
 
   function openFile(fileId: string) {
     setSession((current) => ({
@@ -402,7 +412,7 @@ export function EditorWorkspace({ projectId, files: initialFiles, entryPath, ini
           <button type="button" aria-label="Create file" title="Create file" onClick={() => void createFile()}><FilePlus2 size={14}/></button>
         </div>
         <div role="tree" aria-label="File tree" className="min-h-0 flex-1 overflow-y-auto py-1">
-          {visibleFiles.map((file) => <button key={file.id} type="button" role="treeitem" aria-selected={active?.id === file.id} tabIndex={treeFocusId === file.id ? 0 : -1}
+          {visibleFiles.map((file) => <button key={file.id} type="button" role="treeitem" aria-selected={active?.id === file.id} tabIndex={effectiveTreeFocusId === file.id ? 0 : -1}
             ref={(node) => { if (node) treeRefs.current.set(file.id, node); else treeRefs.current.delete(file.id) }}
             onFocus={() => setTreeFocusId(file.id)} onClick={() => openFile(file.id)} onKeyDown={(event) => { if (['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) { event.preventDefault(); moveTreeFocus(file.id, event.key) }; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openFile(file.id) } }}
             className="flex w-full items-center gap-2 truncate px-3 py-1.5 text-left text-[11px] hover:bg-[var(--muted)]"
