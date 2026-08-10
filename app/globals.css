@@ -1,0 +1,104 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,600;1,9..144,400&family=Outfit:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+  --font-serif: 'Fraunces', ui-serif, Georgia, serif;
+  --font-mono: 'DM Mono', ui-monospace, monospace;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input-background: var(--input-background);
+  --color-switch-background: var(--switch-background);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  color-scheme: light;
+  --font-size: 15px;
+  --background: #f5edd8;
+  --foreground: #1e1206;
+  --card: #eee5cc;
+  --card-foreground: #1e1206;
+  --popover: #eee5cc;
+  --popover-foreground: #1e1206;
+  --primary: #2c1a08;
+  --primary-foreground: #f5edd8;
+  --secondary: #e6d9be;
+  --secondary-foreground: #2c1a08;
+  --muted: #ddd0b4;
+  --muted-foreground: #7a6040;
+  --accent: #c8922a;
+  --accent-foreground: #1e1206;
+  --destructive: #c0392b;
+  --destructive-foreground: #f5f0e8;
+  --border: rgba(44, 34, 20, 0.12);
+  --input: transparent;
+  --input-background: #e8e2d4;
+  --switch-background: #c8bea8;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --ring: rgba(139, 111, 71, 0.4);
+  --chart-1: #8b6f47;
+  --chart-2: #6b8f71;
+  --chart-3: #7a6b8a;
+  --chart-4: #c4874a;
+  --chart-5: #5a8c8a;
+  --radius: 0.75rem;
+  --sidebar: #ede8dc;
+  --sidebar-foreground: #1e180a;
+  --sidebar-primary: #2c2214;
+  --sidebar-primary-foreground: #f5f0e8;
+  --sidebar-accent: #e4dccc;
+  --sidebar-accent-foreground: #2c2214;
+  --sidebar-border: rgba(44, 34, 20, 0.1);
+  --sidebar-ring: rgba(139, 111, 71, 0.4);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+  }
+  html {
+    font-size: var(--font-size);
+  }
+}
