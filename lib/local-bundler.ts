@@ -1,5 +1,5 @@
 import { Worker } from 'node:worker_threads'
-import { finalizePreviewDocument, type PreviewBuild, type PreviewDiagnostic } from '@/lib/preview-runtime'
+import { finalizePreviewDocument, hasStaticallyUnboundedLoop, type PreviewBuild, type PreviewDiagnostic } from '@/lib/preview-runtime'
 
 interface BuildFile { path: string; content: string }
 interface BundleOptions { timeoutMs?: number; maxOutputBytes?: number }
@@ -81,6 +81,8 @@ export async function bundleReactProject(files: BuildFile[], entryPath: string, 
   if (!files.length || files.length > 250) throw new Error('Project exceeds the local build input limit.')
   const inputBytes = files.reduce((total, file) => total + Buffer.byteLength(file.path) + Buffer.byteLength(file.content), 0)
   if (inputBytes > MAX_INPUT_BYTES) throw new Error('Project exceeds the local build input limit.')
+  const runaway = files.find((file) => /\.[cm]?[jt]sx?$/i.test(file.path) && hasStaticallyUnboundedLoop(file.content))
+  if (runaway) return { html: '', diagnostics: [{ severity: 'error', path: runaway.path, message: 'Local build blocked a statically unbounded loop before it could freeze Lotus.' }] }
 
   const timeoutMs = Math.min(15_000, Math.max(1, options.timeoutMs ?? DEFAULT_TIMEOUT_MS))
   const maxOutputBytes = Math.min(DEFAULT_MAX_OUTPUT_BYTES, Math.max(1_024, options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES))

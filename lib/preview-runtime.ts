@@ -29,6 +29,10 @@ const IMAGE_MIME: Record<string, string> = {
   svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', ico: 'image/x-icon',
 }
 
+export function hasStaticallyUnboundedLoop(source: string) {
+  return /\bwhile\s*\(\s*(?:true|!\s*0|1)\s*\)|\bfor\s*\(\s*;\s*;\s*\)/.test(source)
+}
+
 function resolveReference(fromPath: string, reference: string) {
   const clean = reference.split(/[?#]/, 1)[0]
   if (!clean || clean.startsWith('/') || clean.includes('\\') || EXTERNAL_REFERENCE.test(clean)) return null
@@ -146,6 +150,12 @@ function assembleHtml(entryPath: string, source: string, byPath: Map<string, str
     const linked = linkDepth < 1 ? assembleHtml(path, content, byPath, diagnostics, linkDepth + 1) : content
     const safePage = finalizePreviewDocument(linked)
     return `<a${before}href="data:text/html;base64,${base64Utf8(safePage)}"${after}>`
+  })
+  html = html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (tag, attributes: string, code: string) => {
+    if (!hasStaticallyUnboundedLoop(code)) return tag
+    const path = attributes.match(/data-lotus-path=["']([^"']+)["']/i)?.[1] ?? entryPath
+    diagnostics.push({ severity: 'error', path, message: 'Preview blocked a statically unbounded loop before it could freeze Lotus.' })
+    return '<!-- Lotus blocked a statically unbounded preview script. -->'
   })
   return html
 }
