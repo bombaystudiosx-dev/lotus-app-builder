@@ -148,3 +148,74 @@ Result: PASS (exit 0), 37.9 seconds.
 - No Task 6 work was performed.
 - All changes stayed inside the assigned `lotus-real-product` worktree.
 - No product external API, deployment, push, credential, or third-party mutation was performed.
+
+---
+
+## Fix Round 2 (2026-08-10)
+
+### Outcome
+
+Closed the remaining three Important security gaps: dynamic/runtime code creation, unbounded recursive page expansion, and computed navigation bypasses. Server-side supersession now aborts the prior worker rather than only ignoring its result.
+
+### Dynamic code and runaway containment
+
+- parse5 traversal now descends into `template.content`, so scripts later cloned from templates receive the same static rejection and Acorn loop/function instrumentation as ordinary document scripts.
+- Replaced text blacklist matching with Acorn AST inspection. The detector constant-folds string/template member names, follows aliases of `window`/`globalThis`/`self` and `location`, rejects unknown computed global access, and covers direct/computed/aliased location mutation, Navigation API calls, reflection-based global mutation, fetch/XHR/socket/worker/beacon paths, `eval`, `Function`, dynamic `import()`, dynamic-script creation, HTML sinks, `document.write`, and contextual fragments.
+- The bridge is installed before user code and locks down runtime dynamic-code surfaces. It rejects script/active-content creation and insertion through DOM node, ParentNode, ChildNode, Range, shadow-root, HTML setter, adjacent-HTML, document-write, string-timer, `eval`, and `Function` paths. Computed `innerHTML` is structurally sanitized before insertion.
+- Runtime bridge events use a random in-closure channel captured before user code. Console/error/navigation consumers require the current iframe source, bounded schema, and authenticated channel; forged same-frame event envelopes are ignored.
+
+### Navigation containment and honest export/query behavior
+
+- Removed reliance on the unsupported `navigate-to` CSP directive. Static AST rejection, locked runtime APIs, form/link sanitization, and host-side iframe load containment now enforce navigation behavior.
+- The bridge allows one navigation only for a genuine user click on a packaged local `data:text/html;base64` page, stops subsequent user handlers, and authenticates that pending load to the host. Any unannounced second iframe load recreates the original sandboxed `srcdoc`.
+- The requested open-new-window behavior remains intentionally unavailable because executing generated HTML in a new unsandboxed context would weaken isolation. Every former open action is explicitly labeled **Download Preview** and exports inert HTML; clipboard actions copy HTML source.
+- Local-link query strings are retained as `data-lotus-query` metadata and produce a diagnostic stating that they do not change the embedded data-page URL. Fragments continue to be applied to the packaged page URL.
+
+### Expansion and cancellation bounds
+
+- Recursive page assembly shares one global budget: 5 MiB of cumulative source/serialized/base64 expansion and 20,000 estimated-plus-visited nodes.
+- Budget reservations occur before parsing linked sources and before base64 allocation. Exceeding either bound returns empty HTML plus a deterministic `Preview expansion budget exceeded` diagnostic.
+- The authenticated server build action now coordinates by user, project, preview session, and monotonic revision. A newer React build aborts the preceding build's `AbortSignal`; the bundler rejects, terminates its worker in `finally`, and releases owner/global slots. Late older revisions cannot cancel or replace newer work.
+
+### Exploit regression evidence
+
+Focused command:
+
+`pnpm exec vitest run lib/preview-runtime.test.ts components/lotus/live-preview.test.tsx components/lotus/preview-workbench.test.tsx lib/local-bundler.test.ts components/lotus/editor-workspace.test.tsx`
+
+Result: PASS, 5 files and 44 tests.
+
+The focused suite proves:
+
+- template-contained computed loops are instrumented;
+- recognizable dynamic script/eval/Function/import source is removed with diagnostics;
+- runtime-computed script tag creation throws and computed `innerHTML` strips scripts before insertion;
+- aliased, computed `globalThis` location mutation is rejected;
+- a four-way, seven-level exponential page graph fails at the shared expansion budget instead of allocating the full expansion;
+- an unexpected second iframe load recreates sandboxed `srcdoc`, while one channel-authenticated local-page load remains permitted;
+- forged bridge channels and malformed/oversized/flooding messages are ignored;
+- React bundling, editor runtime routing, assets, cancellation, timeout, and worker cleanup regressions remain green.
+
+### Final verification
+
+Command: `pnpm run verify`
+
+Result: PASS (exit 0), 61.8 seconds.
+
+- TypeScript: PASS, `tsc --noEmit`.
+- ESLint: PASS, no warnings or errors.
+- Tests: PASS, 12 files and 111 tests.
+- Production build: PASS, Next.js 16.3.0 compiled, typechecked, generated all routes, and finalized optimization.
+- Audit: PASS, `No known vulnerabilities found` at the high-severity threshold.
+- Diff hygiene: PASS, `git diff --check` returned no findings before commit.
+
+### Fix-round commits
+
+- `566747a` — RED template, dynamic-code, computed-navigation, expansion, and host-load containment regressions.
+- `26a47a7` — GREEN AST/runtime containment, global expansion budgets, authenticated safe-link loads, and real server build cancellation.
+
+### Scope
+
+- No Task 6 work was performed.
+- All changes stayed inside the assigned `lotus-real-product` worktree.
+- No product external API, deployment, push, credential, or third-party mutation was performed.
