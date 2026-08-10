@@ -197,4 +197,67 @@ describe('safe static preview assembly', () => {
     expect(output.html).toBe('')
     expect(output.diagnostics).toEqual([expect.objectContaining({ severity: 'error', message: expect.stringContaining('budget') })])
   })
+
+  it('blocks intrinsic Function constructors, including computed constructor strings and prototype chains', async () => {
+    const rejected = assembleStaticPreview(files({
+      'index.html': `<script>(function safe(){})['con' + 'structor']('document.body.dataset.pwned="true"')(); Function['pro' + 'totype']['constructor']('void 0')()</script>`,
+    }), 'index.html')
+    expect(rejected.html).not.toContain('dataset.pwned')
+    expect(rejected.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining('dynamic code') })]))
+
+    const runtimeGuarded = assembleStaticPreview(files({
+      'index.html': `<main></main><script>const key=['con','structor'].join(''); try {(function(){})[key]('document.body.dataset.pwned="true"')()} catch (_) {document.body.dataset.constructorBlocked='true'}</script>`,
+    }), 'index.html')
+    const dom = new JSDOM(runtimeGuarded.html, { runScripts: 'dangerously' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(dom.window.document.body.dataset.constructorBlocked).toBe('true')
+    expect(dom.window.document.body.dataset.pwned).toBeUndefined()
+    dom.window.close()
+  })
+
+  it('blocks destructured and reflective location aliases plus dynamic refresh metas', async () => {
+    for (const code of [
+      `const {location: nav}=globalThis; nav.href='https://evil.example/destructured'`,
+      `const nav=Reflect.get(globalThis,'location'); nav['replace']('https://evil.example/reflected')`,
+    ]) {
+      const output = assembleStaticPreview(files({ 'index.html': `<script>${code}</script>` }), 'index.html')
+      expect(output.html).not.toContain('evil.example')
+      expect(output.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining('navigation') })]))
+    }
+
+    const dynamicMeta = assembleStaticPreview(files({
+      'index.html': `<main></main><script>const kind=['me','ta'].join(''); const meta=document.createElement(kind); meta.httpEquiv=['re','fresh'].join(''); meta.content='0;url=https://evil.example/meta'; try {document.head.appendChild(meta)} catch (_) {document.body.dataset.metaBlocked='true'}</script>`,
+    }), 'index.html')
+    const dom = new JSDOM(dynamicMeta.html, { runScripts: 'dangerously' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(dom.window.document.querySelector('meta[http-equiv="refresh"]')).toBeNull()
+    expect(dom.window.document.body.dataset.metaBlocked).toBe('true')
+    dom.window.close()
+  })
+
+  it('structurally authenticates exact assembler-created page links rather than any data URL prefix', () => {
+    const output = assembleStaticPreview(files({
+      'index.html': '<a id="safe" href="about.html">Safe</a><a id="forged" href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">Forged</a>',
+      'about.html': '<p>About</p>',
+    }), 'index.html')
+    const dom = new JSDOM(output.html)
+
+    expect(dom.window.document.querySelector('#safe')?.hasAttribute('data-lotus-local-page')).toBe(true)
+    expect(dom.window.document.querySelector('#forged')?.hasAttribute('data-lotus-local-page')).toBe(false)
+    expect(dom.window.document.querySelector('#forged')?.getAttribute('href')).toBe('#')
+    expect(output.html).toContain('new WeakMap')
+    expect(output.html).toContain('localPages.get(target)')
+    expect(output.html).not.toContain("href.indexOf('data:text/html;base64,')")
+  })
+
+  it('reserves repeated asset and CSS data-url expansion before allocating the output', () => {
+    const repeatedImages = Array.from({ length: 5_000 }, () => '<img src="small.svg">').join('')
+    const output = assembleStaticPreview(files({
+      'index.html': repeatedImages,
+      'small.svg': '<svg xmlns="http://www.w3.org/2000/svg"><circle r="1"/></svg>',
+    }), 'index.html')
+
+    expect(output.html).toBe('')
+    expect(output.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining('budget') })]))
+  })
 })
