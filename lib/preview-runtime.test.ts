@@ -260,6 +260,8 @@ describe('safe static preview assembly', () => {
       `const read=Reflect.get.bind(Reflect); read(globalThis,'location').href='https://evil.example/bound-reflect'`,
       `const describe=Object.getOwnPropertyDescriptor.bind(Object); describe(globalThis,'location').get.call(globalThis).href='https://evil.example/bound-descriptor'`,
       `const proto=document.__proto__; proto.location.href='https://evil.example/legacy-prototype'`,
+      `const {apply,get}=Reflect; apply(get,Reflect,[globalThis,'location']).href='https://evil.example/reflect-apply'`,
+      `const accessors={read:Reflect.get}; accessors.read(globalThis,'location').href='https://evil.example/reflection-container'`,
     ]
 
     for (const code of attempts) {
