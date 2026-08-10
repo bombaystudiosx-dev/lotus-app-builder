@@ -58,6 +58,13 @@ function expectRequiredChildIndexes(database: Database.Database) {
   ]))
 }
 
+function expectRequiredProjectIndexes(database: Database.Database) {
+  expect(database.prepare("PRAGMA index_list('project')").all()).toEqual(expect.arrayContaining([
+    expect.objectContaining({ name: 'project_user_updated_at_idx' }),
+    expect.objectContaining({ name: 'project_user_status_updated_at_idx' }),
+  ]))
+}
+
 describe('migrateDatabase', () => {
   it('initializes a fresh database with relational integrity and query indexes', () => {
     const database = createDatabase()
@@ -142,6 +149,7 @@ describe('migrateDatabase', () => {
     migrateDatabase(database)
 
     expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([])
+    expectRequiredProjectIndexes(database)
     expect(database.prepare("PRAGMA foreign_key_list('project_file')").all()).toContainEqual(expect.objectContaining({ from: 'projectId', table: 'project', to: 'id' }))
     expect(database.prepare("PRAGMA foreign_key_list('project_runtime')").all()).toContainEqual(expect.objectContaining({ from: 'projectId', table: 'project', to: 'id' }))
     database.prepare("INSERT INTO project_file VALUES ('extra-file', 'project-1', 'extra.js', 'export {}', 'utf-8', 9, NULL, NULL, 2, 2)").run()
