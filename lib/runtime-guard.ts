@@ -6,6 +6,20 @@ type ReflectionCall = { kind: ReflectionKind; args: AstNode[] | null; receiver?:
 
 const GUARD_MARKER = '/* lotus-runtime-guard */'
 const MAX_ALIAS_PASSES = 64
+const MAX_BINDING_DEPTH = 32
+const MAX_BINDING_STEPS = 8_192
+
+type AliasState = {
+  globalAliases: Set<string>
+  navigationAliases: Set<string>
+  locationAliases: Set<string>
+  reflectAliases: Set<string>
+  objectAliases: Set<string>
+  reflectionFunctionAliases: Map<string, ReflectionKind>
+}
+
+type BindingResult = { blocked: boolean; changed: boolean }
+type FunctionDefinitions = Map<string, Set<AstNode>>
 
 function guardSource(guardName: string, stateName: string, nowName: string, queueName: string) {
   return `${GUARD_MARKER}
@@ -194,11 +208,6 @@ function isBlockedReflectionCall(
     || reflected.args === null
 }
 
-function patternBindingName(node: AstNode | undefined) {
-  if (node?.type === 'AssignmentPattern') return identifierName(node.left as AstNode)
-  return identifierName(node)
-}
-
 function destructuredReflectionKind(
   value: AstNode,
   key: string | null,
@@ -242,6 +251,274 @@ function isDynamicConstructorReference(node: AstNode | undefined) {
     && constantString(args?.[1]) === 'constructor'
 }
 
+function mergeBindingResult(target: BindingResult, source: BindingResult) {
+  target.blocked ||= source.blocked
+  target.changed ||= source.changed
+}
+
+function addAlias(aliases: Set<string>, name: string) {
+  if (aliases.has(name)) return false
+  aliases.add(name)
+  return true
+}
+
+function setReflectionAlias(aliases: Map<string, ReflectionKind>, name: string, kind: ReflectionKind) {
+  if (aliases.get(name) === kind) return false
+  aliases.set(name, kind)
+  return true
+}
+
+function syntheticMember(value: AstNode, key: string | number): AstNode {
+  return {
+    type: 'MemberExpression',
+    start: value.start,
+    end: value.end,
+    object: value,
+    property: { type: 'Literal', start: value.start, end: value.end, value: key },
+    computed: true,
+  }
+}
+
+function propertyValue(value: AstNode, key: string | number): AstNode {
+  if (value.type === 'ObjectExpression') {
+    const properties = (value.properties as AstNode[] | undefined) ?? []
+    for (const property of [...properties].reverse()) {
+      if (property.type === 'SpreadElement') continue
+      const propertyKey = constantString(property.key as AstNode) ?? identifierName(property.key as AstNode)
+      if (propertyKey === String(key)) return property.value as AstNode
+    }
+    const spread = [...properties].reverse().find((property) => property.type === 'SpreadElement')?.argument as AstNode | undefined
+    if (spread) return propertyValue(spread, key)
+  }
+  if (value.type === 'ArrayExpression' && typeof key === 'number') {
+    const element = (value.elements as Array<AstNode | null> | undefined)?.[key]
+    if (element?.type === 'SpreadElement') return element.argument as AstNode
+    if (element) return element
+  }
+  return syntheticMember(value, key)
+}
+
+function arrayValue(values: AstNode[], anchor: AstNode): AstNode {
+  return { type: 'ArrayExpression', start: anchor.start, end: anchor.end, elements: values }
+}
+
+function recordIdentifierAlias(name: string, value: AstNode | undefined, state: AliasState): BindingResult {
+  const result = { blocked: false, changed: false }
+  if (!value) return result
+  if (isBuiltin(value, 'Reflect', state.reflectAliases)) result.changed = addAlias(state.reflectAliases, name) || result.changed
+  if (isBuiltin(value, 'Object', state.objectAliases)) result.changed = addAlias(state.objectAliases, name) || result.changed
+  const kind = reflectionKind(value, state.reflectAliases, state.objectAliases, state.reflectionFunctionAliases)
+  if (kind) result.changed = setReflectionAlias(state.reflectionFunctionAliases, name, kind) || result.changed
+  if (isGlobalObject(value, state.globalAliases)) result.changed = addAlias(state.globalAliases, name) || result.changed
+  if (isNavigationContainer(value, state.globalAliases, state.navigationAliases, state.reflectAliases, state.objectAliases, state.reflectionFunctionAliases)) {
+    result.changed = addAlias(state.navigationAliases, name) || result.changed
+  }
+  if (isLocationReference(value, state.globalAliases, state.navigationAliases, state.locationAliases, state.reflectAliases, state.objectAliases, state.reflectionFunctionAliases)) {
+    result.changed = addAlias(state.locationAliases, name) || result.changed
+  }
+  return result
+}
+
+function mayBeUndefined(value: AstNode | undefined, state: AliasState) {
+  if (!value) return true
+  if (value.type === 'Literal') return value.value === undefined
+  if (['ObjectExpression', 'ArrayExpression', 'FunctionExpression', 'ArrowFunctionExpression', 'ClassExpression', 'TemplateLiteral', 'ThisExpression', 'NewExpression'].includes(value.type)) return false
+  if (value.type !== 'Identifier') return true
+  return !isBuiltin(value, 'Reflect', state.reflectAliases)
+    && !isBuiltin(value, 'Object', state.objectAliases)
+    && !isGlobalObject(value, state.globalAliases)
+    && identifierName(value) !== 'document'
+    && identifierName(value) !== 'location'
+}
+
+function bindAliasPattern(
+  pattern: AstNode | undefined,
+  value: AstNode | undefined,
+  state: AliasState,
+  budget: { remaining: number },
+  depth = 0,
+): BindingResult {
+  const result = { blocked: false, changed: false }
+  if (!pattern) return result
+  budget.remaining -= 1
+  if (budget.remaining < 0 || depth > MAX_BINDING_DEPTH) return { blocked: true, changed: false }
+  if (pattern.type === 'Identifier') return recordIdentifierAlias(identifierName(pattern) as string, value, state)
+  if (pattern.type === 'AssignmentPattern') {
+    if (value) mergeBindingResult(result, bindAliasPattern(pattern.left as AstNode, value, state, budget, depth + 1))
+    if (mayBeUndefined(value, state)) mergeBindingResult(result, bindAliasPattern(pattern.left as AstNode, pattern.right as AstNode, state, budget, depth + 1))
+    return result
+  }
+  if (pattern.type === 'RestElement') return bindAliasPattern(pattern.argument as AstNode, value, state, budget, depth + 1)
+  if (pattern.type === 'ArrayPattern') {
+    for (const [index, element] of ((pattern.elements as Array<AstNode | null> | undefined) ?? []).entries()) {
+      if (!element) continue
+      if (element.type === 'RestElement') {
+        const source = value?.type === 'ArrayExpression'
+          ? arrayValue(((value.elements as Array<AstNode | null> | undefined) ?? []).slice(index).filter((item): item is AstNode => Boolean(item)), value)
+          : value
+        mergeBindingResult(result, bindAliasPattern(element.argument as AstNode, source, state, budget, depth + 1))
+      } else {
+        mergeBindingResult(result, bindAliasPattern(element, value ? propertyValue(value, index) : undefined, state, budget, depth + 1))
+      }
+    }
+    return result
+  }
+  if (pattern.type !== 'ObjectPattern') return result
+  if (value && objectPatternRequestsBlockedCapability(pattern, value, state.globalAliases, state.navigationAliases, state.locationAliases, state.reflectAliases, state.objectAliases, state.reflectionFunctionAliases)) {
+    result.blocked = true
+  }
+  for (const property of pattern.properties as AstNode[] | undefined ?? []) {
+    if (property.type === 'RestElement') {
+      mergeBindingResult(result, bindAliasPattern(property.argument as AstNode, value, state, budget, depth + 1))
+      continue
+    }
+    const key = constantString(property.key as AstNode) ?? identifierName(property.key as AstNode)
+    if (key === null) {
+      if (value && isReflectionNamespace(value, state.reflectAliases, state.objectAliases)) result.blocked = true
+      continue
+    }
+    const kind = value ? destructuredReflectionKind(value, key, state.reflectAliases, state.objectAliases) : null
+    if (kind) result.blocked = true
+    mergeBindingResult(result, bindAliasPattern(property.value as AstNode, value ? propertyValue(value, key) : undefined, state, budget, depth + 1))
+  }
+  return result
+}
+
+function inferredParameterReflectionKind(key: string | null): ReflectionKind | null {
+  if (key === 'apply' || key === 'get') return key
+  if (['getOwnPropertyDescriptor', 'getOwnPropertyDescriptors', 'getPrototypeOf'].includes(key ?? '')) return key as ReflectionKind
+  if (key === '__lookupGetter__' || key === '__lookupSetter__') return 'lookupGetter'
+  return null
+}
+
+function inferParameterReflectionAliases(
+  pattern: AstNode | undefined,
+  state: AliasState,
+  budget: { remaining: number },
+  depth = 0,
+): BindingResult {
+  const result = { blocked: false, changed: false }
+  if (!pattern) return result
+  budget.remaining -= 1
+  if (budget.remaining < 0 || depth > MAX_BINDING_DEPTH) return { blocked: true, changed: false }
+  if (pattern.type === 'AssignmentPattern') return inferParameterReflectionAliases(pattern.left as AstNode, state, budget, depth + 1)
+  if (pattern.type === 'RestElement') return inferParameterReflectionAliases(pattern.argument as AstNode, state, budget, depth + 1)
+  if (pattern.type === 'ArrayPattern') {
+    for (const element of (pattern.elements as Array<AstNode | null> | undefined) ?? []) {
+      if (element) mergeBindingResult(result, inferParameterReflectionAliases(element, state, budget, depth + 1))
+    }
+    return result
+  }
+  if (pattern.type !== 'ObjectPattern') return result
+  for (const property of pattern.properties as AstNode[] | undefined ?? []) {
+    if (property.type === 'RestElement') {
+      mergeBindingResult(result, inferParameterReflectionAliases(property.argument as AstNode, state, budget, depth + 1))
+      continue
+    }
+    const key = constantString(property.key as AstNode) ?? identifierName(property.key as AstNode)
+    const kind = inferredParameterReflectionKind(key)
+    const value = property.value as AstNode | undefined
+    const name = value?.type === 'AssignmentPattern' ? identifierName(value.left as AstNode) : identifierName(value)
+    if (kind && name) result.changed = setReflectionAlias(state.reflectionFunctionAliases, name, kind) || result.changed
+    mergeBindingResult(result, inferParameterReflectionAliases(value, state, budget, depth + 1))
+  }
+  return result
+}
+
+function addFunctionDefinition(definitions: FunctionDefinitions, name: string, value: AstNode) {
+  const functions = definitions.get(name) ?? new Set<AstNode>()
+  const changed = !functions.has(value)
+  functions.add(value)
+  definitions.set(name, functions)
+  return changed
+}
+
+function isFunctionNode(node: AstNode | undefined) {
+  return Boolean(node && ['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(node.type))
+}
+
+function resolveFunctionTargets(node: AstNode | undefined, definitions: FunctionDefinitions, depth = 0): AstNode[] {
+  if (!node || depth > MAX_BINDING_DEPTH) return []
+  if (isFunctionNode(node)) return [node]
+  if (node.type === 'ChainExpression') return resolveFunctionTargets(node.expression as AstNode, definitions, depth + 1)
+  if (node.type === 'SequenceExpression') {
+    const expressions = node.expressions as AstNode[] | undefined
+    return resolveFunctionTargets(expressions?.at(-1), definitions, depth + 1)
+  }
+  const name = identifierName(node)
+  if (name) return [...(definitions.get(name) ?? [])]
+  if (node.type === 'MemberExpression') {
+    const key = memberName(node)
+    const owner = node.object as AstNode | undefined
+    if (key !== null && owner?.type === 'ObjectExpression') return resolveFunctionTargets(propertyValue(owner, key), definitions, depth + 1)
+  }
+  return []
+}
+
+function callArguments(node: AstNode | undefined): AstNode[] | null {
+  if (!node || node.type !== 'ArrayExpression') return null
+  const values: AstNode[] = []
+  for (const element of (node.elements as Array<AstNode | null> | undefined) ?? []) {
+    if (!element) continue
+    if (element.type === 'SpreadElement') {
+      const expanded = callArguments(element.argument as AstNode)
+      if (!expanded) return null
+      values.push(...expanded)
+    } else values.push(element)
+  }
+  return values
+}
+
+function directCallArguments(args: AstNode[]) {
+  const values: AstNode[] = []
+  for (const argument of args) {
+    if (argument.type !== 'SpreadElement') {
+      values.push(argument)
+      continue
+    }
+    const expanded = callArguments(argument.argument as AstNode)
+    if (expanded) values.push(...expanded)
+  }
+  return values
+}
+
+function invocationBindings(node: AstNode, definitions: FunctionDefinitions, state: AliasState): Array<{ functions: AstNode[]; args: AstNode[] }> {
+  if (node.type !== 'CallExpression' && node.type !== 'NewExpression') return []
+  const callee = node.callee as AstNode | undefined
+  const rawArgs = (node.arguments as AstNode[] | undefined) ?? []
+  if (node.type === 'CallExpression' && callee?.type === 'MemberExpression') {
+    const method = memberName(callee)
+    if (reflectionKind(callee, state.reflectAliases, state.objectAliases, state.reflectionFunctionAliases) === 'apply') {
+      const args = callArguments(rawArgs[2])
+      return args ? [{ functions: resolveFunctionTargets(rawArgs[0], definitions), args }] : []
+    }
+    if (method === 'construct' && isBuiltin(callee.object as AstNode, 'Reflect', state.reflectAliases)) {
+      const args = callArguments(rawArgs[1])
+      return args ? [{ functions: resolveFunctionTargets(rawArgs[0], definitions), args }] : []
+    }
+    if (method === 'call') return [{ functions: resolveFunctionTargets(callee.object as AstNode, definitions), args: rawArgs.slice(1) }]
+    if (method === 'apply') {
+      const args = callArguments(rawArgs[1])
+      return args ? [{ functions: resolveFunctionTargets(callee.object as AstNode, definitions), args }] : []
+    }
+    if (method === 'bind') return [{ functions: resolveFunctionTargets(callee.object as AstNode, definitions), args: rawArgs.slice(1) }]
+  }
+  return [{ functions: resolveFunctionTargets(callee, definitions), args: directCallArguments(rawArgs) }]
+}
+
+function bindFunctionParameters(fn: AstNode, args: AstNode[], state: AliasState, budget: { remaining: number }) {
+  const result = { blocked: false, changed: false }
+  const params = (fn.params as AstNode[] | undefined) ?? []
+  for (const [index, param] of params.entries()) {
+    if (param.type === 'RestElement') {
+      mergeBindingResult(result, bindAliasPattern(param.argument as AstNode, arrayValue(args.slice(index), fn), state, budget))
+      break
+    }
+    mergeBindingResult(result, bindAliasPattern(param, args[index], state, budget))
+  }
+  return result
+}
+
 export function hasBlockedBrowserCapability(source: string) {
   let ast: AstNode
   try { ast = parse(source, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true }) as unknown as AstNode } catch { return false }
@@ -251,38 +528,56 @@ export function hasBlockedBrowserCapability(source: string) {
   const reflectAliases = new Set<string>()
   const objectAliases = new Set<string>()
   const reflectionFunctionAliases = new Map<string, ReflectionKind>()
+  const state: AliasState = { globalAliases, navigationAliases, locationAliases, reflectAliases, objectAliases, reflectionFunctionAliases }
+  const functionDefinitions: FunctionDefinitions = new Map()
+  walk(ast, (node) => {
+    if (node.type === 'FunctionDeclaration') {
+      const name = identifierName(node.id as AstNode)
+      if (name) addFunctionDefinition(functionDefinitions, name, node)
+      return
+    }
+    if (node.type !== 'VariableDeclarator' && node.type !== 'AssignmentExpression') return
+    const target = (node.id ?? node.left) as AstNode | undefined
+    const value = (node.init ?? node.right) as AstNode | undefined
+    const name = identifierName(target)
+    if (name && isFunctionNode(value)) addFunctionDefinition(functionDefinitions, name, value as AstNode)
+  })
   let blockedBinding = false
   let aliasesChanged = true
   let aliasPasses = 0
   while (aliasesChanged && aliasPasses < MAX_ALIAS_PASSES) {
     aliasPasses += 1
     aliasesChanged = false
+    const bindingBudget = { remaining: MAX_BINDING_STEPS }
     walk(ast, (node) => {
-      if (node.type !== 'VariableDeclarator' && node.type !== 'AssignmentExpression') return
-      const target = (node.id ?? node.left) as AstNode | undefined
-      const value = (node.init ?? node.right) as AstNode | undefined
-      if (!value) return
-      if (objectPatternRequestsBlockedCapability(target, value, globalAliases, navigationAliases, locationAliases, reflectAliases, objectAliases, reflectionFunctionAliases)) blockedBinding = true
-      if (target?.type === 'ObjectPattern') {
-        for (const property of target.properties as AstNode[] | undefined ?? []) {
-          const key = constantString(property.key as AstNode) ?? identifierName(property.key as AstNode)
-          const name = patternBindingName(property.value as AstNode)
-          const kind = destructuredReflectionKind(value, key, reflectAliases, objectAliases)
-          if (name && kind) {
-            blockedBinding = true
-            if (reflectionFunctionAliases.get(name) !== kind) { reflectionFunctionAliases.set(name, kind); aliasesChanged = true }
-          }
+      if (isFunctionNode(node)) {
+        for (const param of (node.params as AstNode[] | undefined) ?? []) {
+          const result = inferParameterReflectionAliases(param, state, bindingBudget)
+          blockedBinding ||= result.blocked
+          aliasesChanged ||= result.changed
         }
       }
-      const name = identifierName(target)
-      if (!name) return
-      if (!reflectAliases.has(name) && isBuiltin(value, 'Reflect', reflectAliases)) { reflectAliases.add(name); aliasesChanged = true }
-      if (!objectAliases.has(name) && isBuiltin(value, 'Object', objectAliases)) { objectAliases.add(name); aliasesChanged = true }
-      const kind = reflectionKind(value, reflectAliases, objectAliases, reflectionFunctionAliases)
-      if (kind && reflectionFunctionAliases.get(name) !== kind) { reflectionFunctionAliases.set(name, kind); aliasesChanged = true }
-      if (!globalAliases.has(name) && isGlobalObject(value, globalAliases)) { globalAliases.add(name); aliasesChanged = true }
-      if (!navigationAliases.has(name) && isNavigationContainer(value, globalAliases, navigationAliases, reflectAliases, objectAliases, reflectionFunctionAliases)) { navigationAliases.add(name); aliasesChanged = true }
-      if (!locationAliases.has(name) && isLocationReference(value, globalAliases, navigationAliases, locationAliases, reflectAliases, objectAliases, reflectionFunctionAliases)) { locationAliases.add(name); aliasesChanged = true }
+      if (node.type === 'VariableDeclarator' || node.type === 'AssignmentExpression') {
+        const target = (node.id ?? node.left) as AstNode | undefined
+        const value = (node.init ?? node.right) as AstNode | undefined
+        const name = identifierName(target)
+        const referencedFunctions = resolveFunctionTargets(value, functionDefinitions)
+        if (name) {
+          for (const referencedFunction of referencedFunctions) {
+            if (addFunctionDefinition(functionDefinitions, name, referencedFunction)) aliasesChanged = true
+          }
+        }
+        const result = bindAliasPattern(target, value, state, bindingBudget)
+        blockedBinding ||= result.blocked
+        aliasesChanged ||= result.changed
+      }
+      for (const invocation of invocationBindings(node, functionDefinitions, state)) {
+        for (const fn of invocation.functions) {
+          const result = bindFunctionParameters(fn, invocation.args, state, bindingBudget)
+          blockedBinding ||= result.blocked
+          aliasesChanged ||= result.changed
+        }
+      }
     })
   }
   if (aliasesChanged) return true

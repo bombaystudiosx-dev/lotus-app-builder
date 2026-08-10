@@ -282,6 +282,14 @@ describe('safe static preview assembly', () => {
       `const escape = ({api: {getOwnPropertyDescriptor: describe}}) => describe(globalThis, 'location').set.call(globalThis, 'https://evil.example/parameter-nested'); escape({api: Object})`,
       `const escape = ({get: read} = Reflect) => read(globalThis, 'location').assign('https://evil.example/parameter-default'); escape()`,
       `function escape(...[api]) { const {get: read} = api; read(globalThis, 'location').href = 'https://evil.example/parameter-rest' } escape(Reflect)`,
+      `function escape(api) { const {get: read} = api; read(globalThis, 'location').href = 'https://evil.example/parameter-call' } escape.call(null, Reflect)`,
+      `function escape(api) { const {get: read} = api; read(globalThis, 'location').href = 'https://evil.example/parameter-apply' } escape.apply(null, [Reflect])`,
+      `function escape(api) { const {get: read} = api; read(globalThis, 'location').href = 'https://evil.example/parameter-reflect-apply' } Reflect.apply(escape, null, [Reflect])`,
+      `function escape(api) { const {get: read} = api; read(globalThis, 'location').href = 'https://evil.example/parameter-bind' } const bound = escape.bind(null, Reflect); bound()`,
+      `function Escape(api) { const {get: read} = api; read(globalThis, 'location').href = 'https://evil.example/parameter-construct' } Reflect.construct(Escape, [Reflect])`,
+      `function escape(api) { const {get: read} = api; read(globalThis, 'location').href = 'https://evil.example/parameter-spread' } escape(...[Reflect])`,
+      `[Reflect].forEach(({get: read}) => read(globalThis, 'location').href = 'https://evil.example/parameter-callback')`,
+      `const invoke = (callback) => callback(Reflect); invoke(({get: read}) => read(globalThis, 'location').href = 'https://evil.example/parameter-higher-order')`,
     ]
 
     for (const code of attempts) {
@@ -291,6 +299,18 @@ describe('safe static preview assembly', () => {
         expect.objectContaining({ message: expect.stringContaining('navigation') }),
       ]))
     }
+  })
+
+  it('keeps benign function-parameter destructuring available', () => {
+    const output = assembleStaticPreview(files({
+      'index.html': `<main></main><script>
+        const read = (target, key) => target[key];
+        (({get} = Reflect) => { document.querySelector('main').textContent = get({label: 'safe'}, 'label') })({get: read});
+      </script>`,
+    }), 'index.html')
+
+    expect(output.html).toContain("{label: 'safe'}")
+    expect(output.diagnostics).toEqual([])
   })
 
   it('structurally authenticates exact assembler-created page links rather than any data URL prefix', () => {

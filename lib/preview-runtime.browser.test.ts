@@ -62,6 +62,7 @@ describe('safe preview browser containment', () => {
         document.body.dataset.clickContinued = 'true';
       </script>`,
     }), 'index.html')
+    expect(output.html).toMatch(/onclick = function \(\) \{__lotusGuard_[a-z\d]+\(\);/)
     const page = await browser.newPage()
     try {
       await page.setContent(output.html, { waitUntil: 'load' })
