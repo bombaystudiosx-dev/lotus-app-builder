@@ -86,7 +86,10 @@ describe('editor language and diagnostics', () => {
 
 describe('local preview composition', () => {
   it('inlines normalized sibling CSS and JavaScript without network access', () => {
-    const document = buildPreviewDocument(files, 'index.html')
+    const document = buildPreviewDocument([
+      ...files.filter((file) => file.id !== 'html'),
+      { ...files[0], content: '<link rel="stylesheet" href="styles.css"><main>Hello</main><script src="script.js"></script>' },
+    ], 'index.html')
 
     expect(document).toContain('<style data-lotus-path="styles.css">main { color: red; }</style>')
     expect(document).toContain('<script data-lotus-path="script.js">console.info("ready")</script>')
