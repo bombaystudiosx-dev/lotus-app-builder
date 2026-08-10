@@ -262,6 +262,8 @@ describe('safe static preview assembly', () => {
       `const proto=document.__proto__; proto.location.href='https://evil.example/legacy-prototype'`,
       `const {apply,get}=Reflect; apply(get,Reflect,[globalThis,'location']).href='https://evil.example/reflect-apply'`,
       `const accessors={read:Reflect.get}; accessors.read(globalThis,'location').href='https://evil.example/reflection-container'`,
+      `const key=['g','et'].join(''); Reflect[key](globalThis,'location').href='https://evil.example/dynamic-reflect-key'`,
+      `const key=['getOwn','PropertyDescriptor'].join(''); Object[key](globalThis,'location').get.call(globalThis).href='https://evil.example/dynamic-object-key'`,
     ]
 
     for (const code of attempts) {
