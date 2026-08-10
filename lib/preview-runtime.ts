@@ -83,11 +83,22 @@ send('ready',{});
 
 export function finalizePreviewDocument(html: string) {
   const policy = `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">`
-  const withPolicy = /<head\b[^>]*>/i.test(html)
-    ? html.replace(/<head\b[^>]*>/i, (head) => `${head}${policy}`)
-    : `<!doctype html><html><head>${policy}</head><body>${html}</body></html>`
-  return /<\/body\s*>/i.test(withPolicy)
-    ? withPolicy.replace(/<\/body\s*>/i, `${runtimeBridge()}</body>`)
+  const bodyIndex = html.search(/<body\b/i)
+  const head = /<head\b[^>]*>/i.exec(html)
+  const htmlTag = /<html\b[^>]*>/i.exec(html)
+  let withPolicy: string
+  if (head && (bodyIndex < 0 || head.index < bodyIndex)) {
+    const insertion = head.index + head[0].length
+    withPolicy = `${html.slice(0, insertion)}${policy}${html.slice(insertion)}`
+  } else if (htmlTag && bodyIndex >= 0) {
+    const insertion = htmlTag.index + htmlTag[0].length
+    withPolicy = `${html.slice(0, insertion)}<head>${policy}</head>${html.slice(insertion)}`
+  } else {
+    withPolicy = `<!doctype html><html><head>${policy}</head><body>${html}</body></html>`
+  }
+  const closingBody = withPolicy.toLowerCase().lastIndexOf('</body')
+  return closingBody >= 0
+    ? `${withPolicy.slice(0, closingBody)}${runtimeBridge()}${withPolicy.slice(closingBody)}`
     : `${withPolicy}${runtimeBridge()}`
 }
 

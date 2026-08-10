@@ -105,7 +105,10 @@ export async function bundleReactProject(files: BuildFile[], entryPath: string, 
     if (result.diagnostics.length) return { html: '', diagnostics: result.diagnostics }
     const code = result.code ?? ''
     const css = result.css ?? ''
-    const html = `${result.html ?? ''}<style data-lotus-bundle>${css.replace(/<\/style/gi, '<\\/style')}</style><script data-lotus-bundle>${code.replace(/<\/script/gi, '<\\/script')}</script>`
+    const assets = `<style data-lotus-bundle>${css.replace(/<\/style/gi, '<\\/style')}</style><script data-lotus-bundle>${code.replace(/<\/script/gi, '<\\/script')}</script>`
+    const sourceHtml = result.html ?? ''
+    const closingBody = sourceHtml.toLowerCase().lastIndexOf('</body')
+    const html = closingBody >= 0 ? `${sourceHtml.slice(0, closingBody)}${assets}${sourceHtml.slice(closingBody)}` : `${sourceHtml}${assets}`
     if (Buffer.byteLength(html) > maxOutputBytes) throw new Error('Local build exceeds the output limit.')
     return { html: finalizePreviewDocument(html), diagnostics: [] }
   } finally {

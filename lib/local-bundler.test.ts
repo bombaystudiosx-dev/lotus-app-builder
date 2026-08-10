@@ -19,7 +19,7 @@ describe('isolated local React bundler', () => {
     expect(result.html).not.toContain('src="/src/main.tsx"')
     expect(result.diagnostics).toEqual([])
     const dom = new JSDOM(result.html, { runScripts: 'dangerously' })
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 50))
     expect(dom.window.document.getElementById('root')?.textContent).toBe('React starter ready')
     dom.window.close()
   })
