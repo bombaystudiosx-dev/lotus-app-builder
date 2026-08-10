@@ -226,7 +226,7 @@ describe('safe static preview assembly', () => {
     }
 
     const dynamicMeta = assembleStaticPreview(files({
-      'index.html': `<main></main><script>const kind=['me','ta'].join(''); const meta=document.createElement(kind); meta.httpEquiv=['re','fresh'].join(''); meta.content='0;url=https://evil.example/meta'; try {document.head.appendChild(meta)} catch (_) {document.body.dataset.metaBlocked='true'}</script>`,
+      'index.html': `<main></main><script>try {const kind=['me','ta'].join(''); const meta=document.createElement(kind); meta.httpEquiv=['re','fresh'].join(''); meta.content='0;url=https://evil.example/meta'; document.head.appendChild(meta)} catch (_) {document.body.dataset.metaBlocked='true'}</script>`,
     }), 'index.html')
     const dom = new JSDOM(dynamicMeta.html, { runScripts: 'dangerously' })
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -237,23 +237,30 @@ describe('safe static preview assembly', () => {
 
   it('structurally authenticates exact assembler-created page links rather than any data URL prefix', () => {
     const output = assembleStaticPreview(files({
-      'index.html': '<a id="safe" href="about.html">Safe</a><a id="forged" href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">Forged</a>',
+      'index.html': `<a id="safe" href="about.html">Safe</a><a id="forged" href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">Forged</a><script>document.getElementById('safe').setAttribute('href','data:text/html;base64,PHNjcmlwdD5hbGVydCgyKTwvc2NyaXB0Pg==')</script>`,
       'about.html': '<p>About</p>',
     }), 'index.html')
-    const dom = new JSDOM(output.html)
+    const inertDom = new JSDOM(output.html)
 
-    expect(dom.window.document.querySelector('#safe')?.hasAttribute('data-lotus-local-page')).toBe(true)
-    expect(dom.window.document.querySelector('#forged')?.hasAttribute('data-lotus-local-page')).toBe(false)
-    expect(dom.window.document.querySelector('#forged')?.getAttribute('href')).toBe('#')
+    expect(inertDom.window.document.querySelector('#safe')?.hasAttribute('data-lotus-local-page')).toBe(true)
+    expect(inertDom.window.document.querySelector('#forged')?.hasAttribute('data-lotus-local-page')).toBe(false)
+    expect(inertDom.window.document.querySelector('#forged')?.getAttribute('href')).toBe('#')
     expect(output.html).toContain('new WeakMap')
     expect(output.html).toContain('localPages.get(target)')
     expect(output.html).not.toContain("href.indexOf('data:text/html;base64,')")
+
+    const dom = new JSDOM(output.html, { runScripts: 'dangerously' })
+    const mutated = dom.window.document.querySelector('#safe') as HTMLAnchorElement
+    expect(mutated.getAttribute('href')).toContain('PHNjcmlwdD5hbGVydCgyK')
+    expect(mutated.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, cancelable: true }))).toBe(false)
+    dom.window.close()
   })
 
   it('reserves repeated asset and CSS data-url expansion before allocating the output', () => {
-    const repeatedImages = Array.from({ length: 5_000 }, () => '<img src="small.svg">').join('')
+    const repeatedImages = Array.from({ length: 2_500 }, () => '<img src="small.svg">').join('')
+    const repeatedCss = Array.from({ length: 2_500 }, (_, index) => `.asset-${index}{background:url(small.svg)}`).join('')
     const output = assembleStaticPreview(files({
-      'index.html': repeatedImages,
+      'index.html': `<style>${repeatedCss}</style>${repeatedImages}`,
       'small.svg': '<svg xmlns="http://www.w3.org/2000/svg"><circle r="1"/></svg>',
     }), 'index.html')
 
