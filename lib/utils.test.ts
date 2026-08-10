@@ -24,14 +24,22 @@ describe('redactSensitiveValues', () => {
   })
 
   it('preserves quotes for assignments so generated JavaScript remains valid', () => {
-    const source = 'const config = { apiKey: "VITE_API_KEY=secret-value" }'
+    const source = 'const config = { VITE_API_KEY: "secret-value" }'
     const redacted = redactSensitiveValues(source)
 
-    expect(redacted).toBe('const config = { apiKey: "VITE_API_KEY=[REDACTED]" }')
+    expect(redacted).toBe('const config = { VITE_API_KEY: "[REDACTED]" }')
     expect(() => new Function(redacted)).not.toThrow()
   })
 
   it('handles unquoted configuration assignments without exposing the secret', () => {
     expect(redactSensitiveValues('API_TOKEN=secret-value;')).toBe('API_TOKEN=[REDACTED];')
+  })
+
+  it('redacts camelCase configuration values while preserving valid JavaScript', () => {
+    const source = 'const config = { apiKey: "plain-secret-value" }'
+    const redacted = redactSensitiveValues(source)
+
+    expect(redacted).toBe('const config = { apiKey: "[REDACTED]" }')
+    expect(() => new Function(redacted)).not.toThrow()
   })
 })
