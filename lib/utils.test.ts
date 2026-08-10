@@ -14,4 +14,24 @@ describe('redactSensitiveValues', () => {
       'VITE_API_KEY=[REDACTED] Bearer [REDACTED]',
     )
   })
+
+  it('redacts credential families that do not use assignment syntax', () => {
+    const secret = 'ghp_abcdefghijklmnopqrstuvwxyz1234567890'
+
+    expect(redactSensitiveValues(`const client = { token: "${secret}" }`)).toBe(
+      'const client = { token: "[REDACTED]" }',
+    )
+  })
+
+  it('preserves quotes for assignments so generated JavaScript remains valid', () => {
+    const source = 'const config = { apiKey: "VITE_API_KEY=secret-value" }'
+    const redacted = redactSensitiveValues(source)
+
+    expect(redacted).toBe('const config = { apiKey: "VITE_API_KEY=[REDACTED]" }')
+    expect(() => new Function(redacted)).not.toThrow()
+  })
+
+  it('handles unquoted configuration assignments without exposing the secret', () => {
+    expect(redactSensitiveValues('API_TOKEN=secret-value;')).toBe('API_TOKEN=[REDACTED];')
+  })
 })
