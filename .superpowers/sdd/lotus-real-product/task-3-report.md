@@ -79,3 +79,9 @@
 ### Fix Round 2 commit
 
 - `e1a25d2 fix: recreate indexes after SQLite table rebuilds`
+
+## Fix Round 3
+
+- Extended the direct legacy project-table rebuild test to assert both `project_user_updated_at_idx` and `project_user_status_updated_at_idx`, while retaining child/message index coverage.
+- `pnpm exec vitest run lib/db/migrations.test.ts`: **1 file / 8 tests passed**.
+- `pnpm run verify`: **passed** — typecheck, lint, **6 files / 36 tests**, production build, and high-severity audit; audit reported no known vulnerabilities.
