@@ -69,6 +69,24 @@ describe('EditorWorkspace keyboard and data-loss boundaries', () => {
     expect(screen.getByRole('tab', { name: /src\/index\.html.*unsaved/i })).toBeInTheDocument()
   })
 
+  it('preserves dirty buffers when the mounted workspace is hidden for preview or deployed views', () => {
+    function ViewHarness() {
+      const [codeVisible, setCodeVisible] = React.useState(true)
+      return <>
+        <button type="button" onClick={() => setCodeVisible((visible) => !visible)}>Toggle view</button>
+        <div hidden={!codeVisible}><EditorWorkspace projectId="lotus" files={files} entryPath="index.html" initialFontSize={14} onPreviewChange={vi.fn()} /></div>
+      </>
+    }
+    render(<ViewHarness />)
+    fireEvent.change(screen.getByLabelText('Code editor index.html'), { target: { value: '<main>Still here</main>' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle view' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle view' }))
+
+    expect(screen.getByLabelText('Code editor index.html')).toHaveValue('<main>Still here</main>')
+    expect(screen.getByRole('tab', { name: /unsaved changes/i })).toBeInTheDocument()
+  })
+
   it('reconciles clean external updates and blocks a stale dirty overwrite with a conflict', () => {
     const { rerender } = render(<EditorWorkspace projectId="lotus" files={files.map((file) => ({ ...file, version: 1 }))} entryPath="index.html" initialFontSize={14} onPreviewChange={vi.fn()} />)
     const external = files.map((file) => file.id === 'html' ? { ...file, content: '<main>Server</main>', version: 2 } : { ...file, version: 1 })
