@@ -143,14 +143,11 @@ function fileIcon(mime: string) {
   return <FileText size={10}/>;
 }
 
-// Open the generated app HTML full-screen in a new browser tab.
+// Data URLs have an opaque origin, keeping the full-screen preview away from
+// Lotus cookies and storage just like the sandboxed iframe.
 function openGeneratedApp(html: string | null) {
   if (!html) { toast.error("Generate an app first — then you can open it."); return; }
-  const blob = new Blob([html], { type: "text/html" });
-  const url = URL.createObjectURL(blob);
-  window.open(url, "_blank", "noopener,noreferrer");
-  // Revoke after the new tab has had time to load.
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  window.open(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`, "_blank", "noopener,noreferrer");
 }
 
 // Copy a shareable data URL of the generated app to the clipboard.
@@ -164,62 +161,6 @@ async function copyGeneratedAppLink(html: string | null) {
     toast.error("Could not access the clipboard in this context.");
   }
 }
-
-// ─── Device frames ────────────────────────────────────────────────────────────
-function PhoneFrame({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ position:"relative", width:234, height:480, flexShrink:0 }}>
-      <div style={{ position:"absolute", inset:0, borderRadius:"2.6rem", background:"linear-gradient(160deg,#282828 0%,#0E0E0E 60%,#1A1A1A 100%)", boxShadow:"0 0 0 1px rgba(255,255,255,0.06),0 0 0 2px rgba(0,0,0,0.95),0 32px 80px rgba(0,0,0,0.6)" }}/>
-      <div style={{ position:"absolute", inset:0, borderRadius:"2.6rem", background:"linear-gradient(135deg,rgba(255,255,255,0.07) 0%,transparent 45%,rgba(255,255,255,0.02) 100%)", pointerEvents:"none" }}/>
-      <div style={{ position:"absolute", inset:6, borderRadius:"2.2rem", overflow:"hidden", background:"#050505" }}>
-        <div style={{ position:"absolute", top:9, left:"50%", transform:"translateX(-50%)", width:84, height:24, borderRadius:12, background:"#000", zIndex:10 }}/>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 20px 4px", background:"#F0F4EE" }}>
-          <span style={{ fontSize:9, fontWeight:700, color:"#2D4A3E" }}>9:41</span>
-          <div style={{ width:10 }}/>
-          <div style={{ width:12, height:7, borderRadius:2, background:"#2D4A3E", opacity:0.7 }}/>
-        </div>
-        <div style={{ height:"calc(100% - 33px)" }}>{children}</div>
-      </div>
-      {/* Buttons */}
-      <div style={{ position:"absolute", right:-1.5, top:"30%", width:3, height:48, borderRadius:"0 2px 2px 0", background:"linear-gradient(180deg,#383838,#1E1E1E)" }}/>
-      <div style={{ position:"absolute", left:-1.5, top:"26%", width:3, height:26, borderRadius:"2px 0 0 2px", background:"linear-gradient(180deg,#383838,#1E1E1E)" }}/>
-      <div style={{ position:"absolute", left:-1.5, top:"36%", width:3, height:26, borderRadius:"2px 0 0 2px", background:"linear-gradient(180deg,#383838,#1E1E1E)" }}/>
-    </div>
-  );
-}
-
-function TabletFrame({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ position:"relative", width:500, height:360, flexShrink:0 }}>
-      <div style={{ position:"absolute", inset:0, borderRadius:"1.75rem", background:"linear-gradient(145deg,#F0E8D0,#D4C49A)", boxShadow:"0 0 0 1.5px rgba(180,140,60,0.22),0 24px 56px rgba(0,0,0,0.16),inset 0 1px 0 rgba(255,255,255,0.5)" }}/>
-      <div style={{ position:"absolute", inset:8, borderRadius:"1.4rem", overflow:"hidden", background:"#0A0A0A" }}>{children}</div>
-      <div style={{ position:"absolute", bottom:8, left:"50%", transform:"translateX(-50%)", width:16, height:16, borderRadius:"50%", background:"linear-gradient(145deg,#D4C49A,#B8A070)" }}/>
-    </div>
-  );
-}
-
-function DesktopFrame({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ flexShrink:0, display:"flex", flexDirection:"column", alignItems:"center", width:580 }}>
-      <div style={{ position:"relative", width:"100%", borderRadius:"0.75rem 0.75rem 0 0", background:"linear-gradient(145deg,#EEE4C8,#D0BA8A)", padding:"8px 8px 0", boxShadow:"0 0 0 1.5px rgba(180,140,60,0.2),0 24px 64px rgba(0,0,0,0.2),inset 0 1px 0 rgba(255,255,255,0.5)" }}>
-        <div style={{ display:"flex", justifyContent:"center", paddingBottom:6 }}>
-          <div style={{ width:8, height:8, borderRadius:"50%", background:"#1A1208" }}/>
-        </div>
-        <div style={{ borderRadius:"0.375rem 0.375rem 0 0", overflow:"hidden", aspectRatio:"16/9" }}>{children}</div>
-      </div>
-      <div style={{ width:"56%", height:10, background:"linear-gradient(180deg,#C4B07A,#A89060)" }}/>
-      <div style={{ width:"70%", height:6, borderRadius:"0 0 0.5rem 0.5rem", background:"linear-gradient(180deg,#B8A070,#9A8055)", boxShadow:"0 2px 10px rgba(0,0,0,0.15)" }}/>
-    </div>
-  );
-}
-
-function DeviceFrame({ device, children }: { device:DeviceMode; children:React.ReactNode }) {
-  if (device==="phone")  return <PhoneFrame>{children}</PhoneFrame>;
-  if (device==="tablet") return <TabletFrame>{children}</TabletFrame>;
-  return <DesktopFrame>{children}</DesktopFrame>;
-}
-
-void DeviceFrame
 
 function EmptyPreview() {
   return (
@@ -512,7 +453,7 @@ export default function App({ initial }: LotusBuilderProps) {
   // Build state
   const [autosaved,    setAutosaved]    = useState(true);
   const [dragKey,      setDragKey]      = useState(0); // reset phone position
-  const [history,      setHistory]      = useState<{ label:string; html:string|null }[]>([{ label:"Initial build", html: initial.html }]);
+  const [history,      setHistory]      = useState<{ label:string; html:string|null }[]>([{ label:"Initial build", html: initialPreview.html || null }]);
   const [historyIdx,   setHistoryIdx]   = useState(0);
 
   // Jump to a point in history and restore that HTML snapshot into the preview.
@@ -598,7 +539,7 @@ export default function App({ initial }: LotusBuilderProps) {
       setPreviewDiagnostics(preview.diagnostics);
       setView("preview");
       setMessages(p=>[...p,{ id:(Date.now()+1).toString(), role:"assistant", content:res.reply, ts:new Date() }]);
-      setHistory(h=>[...h.slice(0,historyIdx+1), { label:safeText, html:res.html }]);
+      setHistory(h=>[...h.slice(0,historyIdx+1), { label:safeText, html:preview.html }]);
       setHistoryIdx(i=>i+1);
     } catch (e) {
       setMessages(p=>[...p,{ id:(Date.now()+1).toString(), role:"assistant", content: e instanceof Error ? e.message : "Something went wrong while building.", ts:new Date() }]);

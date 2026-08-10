@@ -95,7 +95,7 @@ export async function bundleReactProject(files: BuildFile[], entryPath: string, 
     const result = await new Promise<WorkerResult>((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error(`Local build timed out after ${timeoutMs}ms.`)), timeoutMs)
       worker.once('message', (message: WorkerResult) => { clearTimeout(timeout); resolve(message) })
-      worker.once('error', (error) => { clearTimeout(timeout); reject(new Error(`Local build worker failed: ${error.message}`)) })
+      worker.once('error', (error) => { clearTimeout(timeout); reject(new Error(`Local build worker failed: ${error.message.replaceAll(process.cwd(), '')}`)) })
       worker.once('exit', (code) => {
         if (code !== 0) { clearTimeout(timeout); reject(new Error('Local build worker stopped before completing.')) }
       })

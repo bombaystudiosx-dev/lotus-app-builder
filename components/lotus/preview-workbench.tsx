@@ -58,6 +58,7 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
         setRuntimeError(payload)
         setConsoleEntries((entries) => [...entries.slice(-199), { id: nextConsoleId.current++, level: 'error', text: payload.message }])
       }
+      if (event.data.kind === 'ready') setRuntimeError(null)
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
