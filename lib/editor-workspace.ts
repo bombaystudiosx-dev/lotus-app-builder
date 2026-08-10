@@ -190,7 +190,7 @@ export function buildPreviewDocument(files: EditorFile[], entryPath: string) {
 
   const byPath = new Map(files.map((file) => [file.path, file.content]))
   let html = entry.content
-  html = html.replace(/<link\b([^>]*?)href=["']([^"']+)["']([^>]*)>/gi, (tag, before, path, after) => {
+  html = html.replace(/<link\b[^>]*?href=["']([^"']+)["'][^>]*>/gi, (tag, path) => {
     const content = byPath.get(path)
     return content === undefined ? tag : `<style data-lotus-path="${path}">${content}</style>`
   })

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import '@testing-library/jest-dom/vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const actions = vi.hoisted(() => ({
   create: vi.fn(), rename: vi.fn(), update: vi.fn(), trash: vi.fn(),
@@ -28,6 +29,7 @@ const files = [
 ]
 
 describe('EditorWorkspace keyboard and data-loss boundaries', () => {
+  afterEach(cleanup)
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()

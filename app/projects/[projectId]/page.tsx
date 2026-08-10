@@ -22,6 +22,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
       editorFontSize: settings.editorFontSize,
       defaultDevice: settings.defaultDevice,
       theme: settings.theme,
+      files: workspace.files,
+      entryPath: workspace.entryPath,
     }} />
   </main>
 }

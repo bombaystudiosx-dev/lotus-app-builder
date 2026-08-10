@@ -84,6 +84,36 @@ export async function updateSettingsAction(input: unknown) {
   return updated
 }
 
+export async function createProjectFileAction(projectId: string, path: string, content = '') {
+  const created = await projects.createFile(await getUserId(), projectId, { path, content })
+  refreshProjectViews(projectId)
+  return created
+}
+
+export async function renameProjectFileAction(projectId: string, fileId: string, path: string) {
+  const updated = await projects.renameFile(await getUserId(), projectId, fileId, path)
+  refreshProjectViews(projectId)
+  return updated
+}
+
+export async function updateProjectFileAction(projectId: string, fileId: string, content: string) {
+  const updated = await projects.updateFile(await getUserId(), projectId, fileId, { content })
+  refreshProjectViews(projectId)
+  return updated
+}
+
+export async function trashProjectFileAction(projectId: string, fileId: string) {
+  const trashed = await projects.trashFile(await getUserId(), projectId, fileId)
+  refreshProjectViews(projectId)
+  return trashed
+}
+
+export async function restoreProjectFileAction(projectId: string, fileId: string) {
+  const restored = await projects.restoreFile(await getUserId(), projectId, fileId)
+  refreshProjectViews(projectId)
+  return restored
+}
+
 // Friendly model labels from the Lotus UI -> AI Gateway model ids.
 const MODEL_MAP: Record<string, string> = {
   'Enigma Auto': 'anthropic/claude-sonnet-4.5',
@@ -123,6 +153,8 @@ export interface Workspace {
   name: string
   html: string | null
   messages: WorkspaceMessage[]
+  files: Array<{ id: string; path: string; content: string; encoding: 'utf-8' | 'utf-16le' }>
+  entryPath: string
 }
 
 export async function getWorkspace(projectId: string): Promise<Workspace | null> {
@@ -136,11 +168,18 @@ export async function getWorkspace(projectId: string): Promise<Workspace | null>
     .where(and(eq(message.projectId, proj.id), eq(message.userId, userId)))
     .orderBy(asc(message.createdAt))
 
-  const index = await projects.getFileByPath(userId, proj.id, 'index.html')
+  const [runtime, files] = await Promise.all([
+    projects.getRuntime(userId, proj.id),
+    projects.listFiles(userId, proj.id),
+  ])
+  const entryPath = runtime?.entryPath ?? 'index.html'
+  const index = files.find((file) => file.path === entryPath)
   return {
     projectId: proj.id,
     name: redactSensitiveValues(proj.name),
     html: index ? redactSensitiveValues(index.content) : null,
+    files: files.map(({ id, path, content, encoding }) => ({ id, path, content, encoding: encoding as 'utf-8' | 'utf-16le' })),
+    entryPath,
     messages: rows.map((r) => ({
       id: r.id,
       role: r.role as 'user' | 'assistant',
