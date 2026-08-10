@@ -174,7 +174,7 @@ function migrateLegacyProjectFiles(sqlite: Database.Database) {
 export function migrateDatabase(sqlite: Database.Database) {
   sqlite.pragma('foreign_keys = OFF')
   try {
-    sqlite.transaction(() => {
+    const migrate = sqlite.transaction(() => {
       sqlite.exec(CREATE_TABLES_SQL)
       rebuildProjectTable(sqlite)
       upgradeProjectLifecycleColumns(sqlite)
@@ -182,7 +182,8 @@ export function migrateDatabase(sqlite: Database.Database) {
       migrateLegacyProjectFiles(sqlite)
       sqlite.exec(CREATE_INDEXES_SQL)
       sqlite.pragma(`user_version = ${SCHEMA_VERSION}`)
-    })()
+    })
+    migrate.immediate()
   } finally {
     sqlite.pragma('foreign_keys = ON')
   }
