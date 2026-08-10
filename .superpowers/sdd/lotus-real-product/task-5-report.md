@@ -81,3 +81,70 @@ Coverage command: `pnpm run test:coverage`
 - All changes were made only in the assigned `lotus-real-product` worktree.
 - No external APIs were called by the product implementation.
 - No deployment, push, credential, or third-party state change was performed.
+
+---
+
+## Fix Round 1 (2026-08-10)
+
+### Outcome
+
+Resolved every Critical and Important review finding plus the practical Minor findings. This section supersedes the earlier statement about opening generated apps in `data:` windows: all preview export surfaces now download inert HTML or copy the HTML source and never execute generated code in an unsandboxed window.
+
+### Security and runtime corrections
+
+- Replaced regex document mutation with parse5 document parsing and structural serialization. Lotus now removes attacker-supplied CSP/base nodes and installs the restrictive CSP plus the console/error bridge as the first two trusted head children, before all user scripts. A regression reproduces a fake `<head>` embedded in script text.
+- Restricted document behavior by removing nested browsing/plugin elements, refresh metas, event handlers, form actions/targets/methods, per-control `formaction`, anchor popup targets/pings, and remote or unsafe links. CSP continues to deny connections, frames, workers, objects, media/network assets, base changes, and forms.
+- Replaced both Builder and workbench new-window actions with Blob-backed HTML downloads. Clipboard actions copy inert HTML source rather than an executable data URL.
+- Added Acorn AST instrumentation for loops, block-bodied functions, single-statement loops, and expression-bodied arrow functions. Per-document randomized guard identifiers capture timing and microtask primitives, prevent marker/name spoofing, and throw after the 100 ms execution budget. Literal infinite loops remain rejected before output.
+- Rejects source access to preview navigation and network primitives, including `fetch`, XHR, sockets, workers, beacons, `window.open`, and location mutation.
+- Hardened the event bridge and receiver with source and event-type checks, an 8 KiB envelope limit, payload schemas, field/string/array limits, a 40-events-per-second rate cap on both sides, and a 200-line console bound.
+- Moved React dependencies into an explicit read-only vendor namespace limited to React, React DOM, and Scheduler package roots. All user imports are resolved only from normalized in-memory project paths; drive paths, UNC paths, file URLs, root-absolute imports, traversal, and non-allowlisted bare packages are rejected before generic esbuild resolution. No `resolveDir` is set.
+- Structurally extracts quoted or unquoted React module entries. SVG, raster image, and font assets remain self-contained data URLs with correct MIME types; CSS and React bundle assets are assembled into the hardened document.
+- Added global (4), per-user (2), and queued (16) build bounds, pre-build file/count/byte checks, post-build byte checks, abort handling, time/memory bounds, unconditional worker cleanup, and authenticated per-user ownership keys.
+- Added client revision ordering and cancellation flags so stale React builds cannot replace newer output. Editor and chat paths never send TSX through static HTML assembly; React editing rebuilds through the isolated server action after persistence.
+- Removed the duplicate Builder device selector and stale dimension label. `PreviewWorkbench` is the single viewport-state owner. Build diagnostics now render even when the build returns empty HTML.
+- Added recursive linked-HTML assembly with cycle/depth bounds, unquoted attribute handling, and preservation of safe query/fragment metadata.
+
+### Exploit regression evidence
+
+Focused command:
+
+`pnpm exec vitest run lib/preview-runtime.test.ts lib/local-bundler.test.ts components/lotus/preview-workbench.test.tsx components/lotus/editor-workspace.test.tsx`
+
+Result: PASS, 4 files and 38 tests.
+
+The focused suite proves:
+
+- absolute `package.json`, Windows drive, UNC, file URL, POSIX absolute, and bare-package disclosure attempts fail without returning file contents or workspace paths;
+- fake-head CSP insertion cannot move policy behind user code and the bridge precedes initial user logging;
+- computed `while (Date.now())` and single-statement loops receive watchdog calls, while a forged Lotus guard marker cannot bypass instrumentation;
+- forms, popup targets, refresh navigation, script navigation/network calls, and network hints are removed or rejected;
+- malformed, oversized, wrong-source, and flooding iframe events are discarded;
+- generated HTML is downloaded without `window.open`;
+- unquoted module/asset attributes, recursive HTML links, query/fragment metadata, SVG, and font data URLs work;
+- React editor updates do not pass raw TSX to the static assembler;
+- timeout and pre-abort cases release all build slots.
+
+### Final verification
+
+Command: `pnpm run verify`
+
+Result: PASS (exit 0), 37.9 seconds.
+
+- TypeScript: PASS, `tsc --noEmit`.
+- ESLint: PASS, no warnings or errors.
+- Tests: PASS, 11 files and 105 tests.
+- Production build: PASS, Next.js 16.3.0 compiled, typechecked, generated all routes, and finalized optimization.
+- Audit: PASS, `No known vulnerabilities found` at the high-severity threshold.
+- Diff hygiene: PASS, `git diff --check` returned no findings before commit.
+
+### Fix-round commits
+
+- `8a151d2` — RED exploit regressions for import disclosure, CSP structure, runaway code, unsafe export, event abuse, assets, recursion, and diagnostics.
+- `b03e26d` — GREEN preview isolation, structural assembly, guarded runtime, bounded vendor bundling, runtime-aware integration, and self-review corrections.
+
+### Scope
+
+- No Task 6 work was performed.
+- All changes stayed inside the assigned `lotus-real-product` worktree.
+- No product external API, deployment, push, credential, or third-party mutation was performed.
