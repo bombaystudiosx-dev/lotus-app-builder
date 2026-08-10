@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 const timestamp = (name: string) => integer(name, { mode: 'timestamp' }).notNull().$defaultFn(() => new Date())
 
@@ -25,14 +25,17 @@ export const verification = sqliteTable('verification', {
   expiresAt: timestamp('expiresAt'), createdAt: integer('createdAt', { mode: 'timestamp' }), updatedAt: integer('updatedAt', { mode: 'timestamp' }),
 })
 export const project = sqliteTable('project', {
-  id: text('id').primaryKey(), userId: text('userId').notNull(), name: text('name').notNull().default('Untitled'),
+  id: text('id').primaryKey(), userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }), name: text('name').notNull().default('Untitled'),
   mode: text('mode').notNull().default('html'), files: text('files', { mode: 'json' }).$type<Record<string, string>>().notNull().default({}),
   createdAt: timestamp('createdAt'), updatedAt: timestamp('updatedAt'),
-})
+}, (table) => [index('project_user_updated_at_idx').on(table.userId, table.updatedAt)])
 export const message = sqliteTable('message', {
-  id: text('id').primaryKey(), projectId: text('projectId').notNull(), userId: text('userId').notNull(),
+  id: text('id').primaryKey(), projectId: text('projectId').notNull().references(() => project.id, { onDelete: 'cascade' }), userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }),
   role: text('role').notNull(), content: text('content').notNull(), createdAt: timestamp('createdAt'),
-})
+}, (table) => [
+  index('message_project_created_at_idx').on(table.projectId, table.createdAt),
+  index('message_user_created_at_idx').on(table.userId, table.createdAt),
+])
 
 export type Project = typeof project.$inferSelect
 export type Message = typeof message.$inferSelect

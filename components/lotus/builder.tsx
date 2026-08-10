@@ -3,19 +3,17 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  Send, Smartphone, Tablet, Monitor, Sparkles, MoreHorizontal,
+  Send, Smartphone, Tablet, Monitor, Sparkles,
   RefreshCw, Code2, Zap, ImageIcon, X, ChevronDown,
   Plus, Upload, FileText, Brain, Bot, Cpu, Undo2, Redo2,
-  Globe, Copy, Download, Eye, Check, Settings, RotateCcw,
-  Plug, Archive, GripVertical, Play,
+  Globe, Copy, Download, Eye, Check, RotateCcw,
+  Plug, GripVertical,
   LogOut,
-  Moon, BookOpen, Heart, Wind, Flame, Star,
-  Bell, TrendingUp,
 } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, LineChart, Line, Area, AreaChart } from "recharts";
 import { LivePreview } from "@/components/lotus/live-preview";
 import { runBuild, type WorkspaceMessage } from "@/app/actions/projects";
 import { authClient } from "@/lib/auth-client";
+import { toast } from "sonner";
 
 const logoLotus = "/logo_lotus.png";
 
@@ -115,15 +113,6 @@ const INIT_CAPS: Capability[] = [
   { id:"ai7",name:"Workflow Automation",category:"AI",     desc:"Multi-step agent pipelines",    active:false },
 ];
 
-const MOCK_FILES = [
-  { name:"src/App.tsx",                   lang:"tsx", code:`export default function App() {\n  return <div className="app">Hello Lotus</div>;\n}` },
-  { name:"src/components/Home.tsx",       lang:"tsx", code:`export default function Home() {\n  return <main>Home screen</main>;\n}` },
-  { name:"src/components/Dashboard.tsx",  lang:"tsx", code:`export default function Dashboard() {\n  return <section>Dashboard</section>;\n}` },
-  { name:"src/lib/supabase.ts",           lang:"ts",  code:`import { createClient } from "@supabase/supabase-js";\nexport const supabase = createClient(URL, KEY);` },
-  { name:"package.json",                  lang:"json",code:`{\n  "name": "lotus-app",\n  "version": "1.0.0"\n}` },
-  { name:"README.md",                     lang:"md",  code:`# Lotus App\n\nBuilt with Lotus AI builder.` },
-];
-
 const PLUS_ITEMS = [
   { icon:<Upload size={12}/>,   label:"Upload File"         },
   { icon:<ImageIcon size={12}/>,label:"Upload Image"        },
@@ -131,10 +120,6 @@ const PLUS_ITEMS = [
   { icon:<Sparkles size={12}/>, label:"Add Skill"           },
   { icon:<Bot size={12}/>,      label:"Add Agent"           },
   { icon:<Cpu size={12}/>,      label:"Add Function"        },
-  { icon:<FileText size={12}/>, label:"Import Design"       },
-  { icon:<Code2 size={12}/>,    label:"Import GitHub Repo"  },
-  { icon:<Settings size={12}/>, label:"Add API Key"         },
-  { icon:<Smartphone size={12}/>,label:"Add Device Capability"},
 ];
 
 const INIT_MESSAGES: ChatMessage[] = [
@@ -153,7 +138,7 @@ function fileIcon(mime: string) {
 
 // Open the generated app HTML full-screen in a new browser tab.
 function openGeneratedApp(html: string | null) {
-  if (!html) { alert("Generate an app first — then you can open it."); return; }
+  if (!html) { toast.error("Generate an app first — then you can open it."); return; }
   const blob = new Blob([html], { type: "text/html" });
   const url = URL.createObjectURL(blob);
   window.open(url, "_blank", "noopener,noreferrer");
@@ -163,13 +148,13 @@ function openGeneratedApp(html: string | null) {
 
 // Copy a shareable data URL of the generated app to the clipboard.
 async function copyGeneratedAppLink(html: string | null) {
-  if (!html) { alert("Generate an app first — then you can copy its link."); return; }
+  if (!html) { toast.error("Generate an app first — then you can copy its link."); return; }
   const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
   try {
     await navigator.clipboard.writeText(dataUrl);
-    alert("App link copied to clipboard — paste it into a browser tab to open your app.");
+    toast.success("App link copied to your clipboard.");
   } catch {
-    alert("Could not access the clipboard in this context.");
+    toast.error("Could not access the clipboard in this context.");
   }
 }
 
@@ -239,9 +224,12 @@ function EmptyPreview() {
 
 // ─── Code panel ───────────────────────────────────────────────────────────────
 function CodePanel({ html }: { html: string | null }) {
-  const files = html ? [{ name:"index.html", lang:"html", code: html }] : MOCK_FILES;
+  const files = html ? [{ name:"index.html", lang:"html", code: html }] : [];
   const [activeFile, setActiveFile] = useState(0);
   const [copied, setCopied] = useState(false);
+  if (!files.length) {
+    return <div className="flex flex-1 items-center justify-center text-sm" style={{ color:"var(--muted-foreground)" }}>Generate an app to inspect its source.</div>;
+  }
   const file = files[Math.min(activeFile, files.length-1)];
 
   function handleCopy() {
@@ -283,7 +271,6 @@ function CodePanel({ html }: { html: string | null }) {
             {[
               { icon:copied?<Check size={11}/>:<Copy size={11}/>, label:copied?"Copied":"Copy", fn:handleCopy },
               { icon:<Download size={11}/>,  label:"Download", fn:handleDownload },
-              { icon:<Archive size={11}/>,   label:"Export ZIP", fn:handleDownload },
             ].map(a=>(
               <button key={a.label} onClick={a.fn}
                 className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
@@ -318,8 +305,8 @@ function DeployedPanel({ html, projectName }:{ html:string|null; projectName:str
         </h3>
         <p style={{ fontSize:12, color:"var(--muted-foreground)", maxWidth:300, lineHeight:1.6 }}>
           {ready
-            ? "Your app is built and running. Open it full-screen in a new tab, copy a shareable link, or prep a store build."
-            : "Describe an app in chat to generate it — then you can open it live, copy a link, or prep a store build."}
+            ? "Your app is built and running. Open it full-screen in a new tab or copy a local share link."
+            : "Describe an app in chat to generate it — then you can open it live or copy a local share link."}
         </p>
       </div>
       <div className="flex flex-wrap gap-2 mt-2 justify-center">
@@ -333,14 +320,6 @@ function DeployedPanel({ html, projectName }:{ html:string|null; projectName:str
           style={{ background:"var(--muted)", color:"var(--muted-foreground)", opacity:ready?1:0.5, cursor:ready?"pointer":"not-allowed" }}>
           <Copy size={12}/> Copy Link
         </button>
-      </div>
-      <div className="flex gap-2">
-        {["App Store","Play Store"].map(d=>(
-          <span key={d} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
-            style={{ background:"var(--muted)", color:"var(--muted-foreground)" }}>
-            <Archive size={11}/> {d} · prep
-          </span>
-        ))}
       </div>
     </div>
   );
@@ -489,35 +468,11 @@ function FunctionsPanel({ caps, onToggle, onClose }:{ caps:Capability[]; onToggl
 
 // ─── View App modal ───────────────────────────────────────────────────────────
 function ViewAppMenu({ onClose, html }:{ onClose:()=>void; html:string|null }) {
-  const [tab, setTab] = useState<"web"|"apple"|"google">("web");
   const ready = !!html;
-  const tabs:[typeof tab, React.ReactNode, string][] = [
-    ["web",    <Globe key="web" size={12}/>,    "Web App"],
-    ["apple",  <Play key="apple" size={12}/>,     "App Store"],
-    ["google", <Smartphone key="google" size={12}/>,"Play Store"],
-  ];
-
-  const field = (label:string, placeholder:string) => (
-    <div key={label}>
-      <label style={{ fontSize:10, fontWeight:600, color:"var(--muted-foreground)", letterSpacing:"0.05em", textTransform:"uppercase", display:"block", marginBottom:4 }}>{label}</label>
-      <input placeholder={placeholder} className="w-full rounded-lg px-3 py-2 outline-none text-xs" style={{ background:"var(--background)", border:"1px solid var(--border)", color:"var(--foreground)", fontFamily:"Outfit,sans-serif" }}/>
-    </div>
-  );
-
   return (
     <Modal title="View App" onClose={onClose}>
       <div className="p-4">
-        <div className="flex gap-1 mb-4 p-1 rounded-xl" style={{ background:"var(--muted)" }}>
-          {tabs.map(([key,icon,label])=>(
-            <button key={key} onClick={()=>setTab(key)}
-              className="flex items-center gap-1.5 flex-1 justify-center py-1.5 rounded-lg text-xs font-medium transition-all"
-              style={{ background:tab===key?"var(--card)":"transparent", color:tab===key?"var(--foreground)":"var(--muted-foreground)", boxShadow:tab===key?"0 1px 4px rgba(0,0,0,0.08)":"none" }}>
-              {icon}{label}
-            </button>
-          ))}
-        </div>
-
-        {tab==="web" && <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3">
           <div>
             <label style={{ fontSize:10, fontWeight:600, color:"var(--muted-foreground)", letterSpacing:"0.05em", textTransform:"uppercase", display:"block", marginBottom:4 }}>Status</label>
             <div className="rounded-lg px-3 py-2 text-xs" style={{ background:"var(--background)", border:"1px solid var(--border)", color:ready?"var(--foreground)":"var(--muted-foreground)" }}>
@@ -532,40 +487,7 @@ function ViewAppMenu({ onClose, html }:{ onClose:()=>void; html:string|null }) {
               className="flex-1 py-2 rounded-xl text-xs font-semibold transition-all hover:opacity-80"
               style={{ background:"var(--muted)", color:"var(--muted-foreground)", opacity:ready?1:0.5, cursor:ready?"pointer":"not-allowed" }}>Copy Link</button>
           </div>
-        </div>}
-
-        {tab==="apple" && <div className="flex flex-col gap-3">
-          {field("Apple Bundle ID","com.yourcompany.app")}
-          {field("Apple Team ID","XXXXXXXXXX")}
-          {field("App Store Category","Health & Fitness")}
-          {field("Version","1.0.0")}
-          {field("Build Number","1")}
-          <div className="rounded-xl p-3 mt-1" style={{ background:"var(--background)", border:"1px solid var(--border)" }}>
-            <p style={{ fontSize:11, fontWeight:600, color:"var(--foreground)", marginBottom:6 }}>App Store Prep Checklist</p>
-            {["App icon (1024×1024)","Screenshots (all sizes)","Privacy policy URL","Support URL","App description"].map(item=>(
-              <div key={item} className="flex items-center gap-2 py-1">
-                <div className="w-4 h-4 rounded flex items-center justify-center" style={{ background:"var(--muted)", border:"1px solid var(--border)" }}/>
-                <span style={{ fontSize:11, color:"var(--muted-foreground)" }}>{item}</span>
-              </div>
-            ))}
-          </div>
-        </div>}
-
-        {tab==="google" && <div className="flex flex-col gap-3">
-          {field("Package Name","com.yourcompany.app")}
-          {field("Version Name","1.0.0")}
-          {field("Version Code","1")}
-          {field("Play Store Category","Health & Fitness")}
-          <div className="rounded-xl p-3 mt-1" style={{ background:"var(--background)", border:"1px solid var(--border)" }}>
-            <p style={{ fontSize:11, fontWeight:600, color:"var(--foreground)", marginBottom:6 }}>Play Store Prep Checklist</p>
-            {["Feature graphic (1024×500)","Screenshots (phone & tablet)","Content rating questionnaire","Privacy policy URL","Short description (80 chars)"].map(item=>(
-              <div key={item} className="flex items-center gap-2 py-1">
-                <div className="w-4 h-4 rounded flex items-center justify-center" style={{ background:"var(--muted)", border:"1px solid var(--border)" }}/>
-                <span style={{ fontSize:11, color:"var(--muted-foreground)" }}>{item}</span>
-              </div>
-            ))}
-          </div>
-        </div>}
+        </div>
       </div>
     </Modal>
   );
@@ -803,7 +725,7 @@ export default function App({ initial }: LotusBuilderProps) {
           <motion.button whileTap={{ scale:0.97 }} onClick={()=>setView("deployed")}
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold"
             style={{ background:"linear-gradient(135deg,#D4A030,#B87820)", color:"#FFF8E8", boxShadow:"0 2px 12px rgba(200,146,42,0.35)" }}>
-            <Zap size={11}/> Deploy
+            <Zap size={11}/> Share
           </motion.button>
           <div className="h-4 w-px mx-1" style={{ background:"var(--border)" }}/>
           <div className="relative" ref={accountMenuRef}>
@@ -1040,9 +962,8 @@ export default function App({ initial }: LotusBuilderProps) {
                   style={{ background:"var(--muted)", color:"var(--muted-foreground)" }}>
                   <RotateCcw size={10}/> Reset
                 </button>
-                <button className="p-1.5 rounded-lg transition-colors hover:opacity-70" style={{ color:"var(--muted-foreground)" }}><RefreshCw size={12}/></button>
+                <button onClick={()=>setDragKey(k=>k+1)} aria-label="Reset preview position" className="p-1.5 rounded-lg transition-colors hover:opacity-70" style={{ color:"var(--muted-foreground)" }}><RefreshCw size={12}/></button>
               </>}
-              <button className="p-1.5 rounded-lg transition-colors hover:opacity-70" style={{ color:"var(--muted-foreground)" }}><MoreHorizontal size={12}/></button>
             </div>
           </div>
 

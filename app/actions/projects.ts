@@ -6,6 +6,7 @@ import { project, message } from '@/lib/db/schema'
 import { and, asc, desc, eq } from 'drizzle-orm'
 import { headers } from 'next/headers'
 import { generateText } from 'ai'
+import { redactSensitiveValues } from '@/lib/safety'
 
 async function getUserId() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -173,9 +174,12 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
   })
 
   // Build the prompt for the model, giving it the current app as context.
-  const userContent = currentHtml
-    ? `Here is the current app HTML:\n\n${currentHtml}\n\n---\n\nApply this change and return the full updated HTML document:\n${prompt}${contextBlock}`
-    : `Build this app and return a complete HTML document:\n${prompt}${contextBlock}`
+  const safePrompt = redactSensitiveValues(prompt)
+  const safeCurrentHtml = currentHtml ? redactSensitiveValues(currentHtml) : null
+  const safeContextBlock = redactSensitiveValues(contextBlock)
+  const userContent = safeCurrentHtml
+    ? `Here is the current app HTML:\n\n${safeCurrentHtml}\n\n---\n\nApply this change and return the full updated HTML document:\n${safePrompt}${safeContextBlock}`
+    : `Build this app and return a complete HTML document:\n${safePrompt}${safeContextBlock}`
 
   let html = currentHtml ?? ''
   try {
@@ -185,17 +189,16 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
       prompt: userContent,
       maxOutputTokens: 8000,
     })
-    html = stripFences(text)
+    html = redactSensitiveValues(stripFences(text))
   } catch (err) {
     const raw = err instanceof Error ? err.message : String(err)
-    console.log('[v0] runBuild generateText error:', raw)
     // Surface the AI Gateway's billing prerequisite clearly instead of a generic error.
     if (/credit card|customer_verification_required|valid credit/i.test(raw)) {
       throw new Error(
         'AI generation is not enabled yet: the Vercel AI Gateway requires a credit card on file to unlock your free credits. Add one in your Vercel dashboard under AI, then try again.',
       )
     }
-    throw new Error(`Generation failed: ${raw}`)
+    throw new Error('Generation failed. Check your server-side AI provider configuration and try again.')
   }
 
   const reply = currentHtml
