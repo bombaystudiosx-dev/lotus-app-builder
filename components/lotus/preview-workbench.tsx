@@ -45,6 +45,7 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
   const frameRef = useRef<HTMLIFrameElement>(null)
   const nextConsoleId = useRef(0)
   const messageBudget = useRef({ startedAt: 0, count: 0 })
+  const runtimeChannel = useRef<string | null>(null)
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
@@ -52,6 +53,14 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
       let encoded = ''
       try { encoded = JSON.stringify(event.data) } catch { return }
       if (encoded.length > 8_192) return
+      if (event.data.kind === 'ready') {
+        if (runtimeChannel.current || typeof event.data.channel !== 'string' || !/^[a-z\d-]{8,64}$/i.test(event.data.channel) || !event.data.payload || typeof event.data.payload !== 'object') return
+        runtimeChannel.current = event.data.channel
+        setRuntimeError(null)
+        return
+      }
+      if (!runtimeChannel.current || event.data.channel !== runtimeChannel.current) return
+      if (event.data.kind === 'navigation' && event.data.payload?.local === true) { runtimeChannel.current = null; return }
       const now = Date.now()
       if (now - messageBudget.current.startedAt > 1_000) messageBudget.current = { startedAt: now, count: 0 }
       if (messageBudget.current.count++ >= 40) return
@@ -67,7 +76,6 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
         setRuntimeError(payload)
         setConsoleEntries((entries) => [...entries.slice(-199), { id: nextConsoleId.current++, level: 'error', text: payload.message }])
       }
-      if (event.data.kind === 'ready' && event.data.payload && typeof event.data.payload === 'object') setRuntimeError(null)
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
@@ -75,6 +83,11 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
 
   const viewport = useMemo(() => previewViewport({ device, orientation, zoom, customWidth, customHeight }), [customHeight, customWidth, device, orientation, zoom])
   const displayHtml = autoRefresh ? html : manualHtml
+
+  useEffect(() => {
+    runtimeChannel.current = null
+    messageBudget.current = { startedAt: 0, count: 0 }
+  }, [displayHtml, revision])
 
   function refresh() {
     setManualHtml(html)

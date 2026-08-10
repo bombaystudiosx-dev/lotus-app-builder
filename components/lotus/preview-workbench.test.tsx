@@ -45,8 +45,9 @@ describe('PreviewWorkbench', () => {
       Object.defineProperty(event, 'source', { value: source })
       fireEvent(window, event)
     }
-    dispatch({ type: 'lotus-preview-event', kind: 'console', payload: { level: 'info', args: ['started'] } })
-    dispatch({ type: 'lotus-preview-event', kind: 'error', payload: { message: 'boom', source: 'app.js', line: 4, column: 2 } })
+    dispatch({ type: 'lotus-preview-event', channel: 'test-channel', kind: 'ready', payload: {} })
+    dispatch({ type: 'lotus-preview-event', channel: 'test-channel', kind: 'console', payload: { level: 'info', args: ['started'] } })
+    dispatch({ type: 'lotus-preview-event', channel: 'test-channel', kind: 'error', payload: { message: 'boom', source: 'app.js', line: 4, column: 2 } })
 
     expect(screen.getByText(/started/)).toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent('boom')
@@ -86,12 +87,15 @@ describe('PreviewWorkbench', () => {
       Object.defineProperty(event, 'source', { value: eventSource })
       fireEvent(window, event)
     }
-    dispatch({ type: 'lotus-preview-event', kind: 'console', payload: { level: 'info', args: ['x'.repeat(20_000)] } })
-    dispatch({ type: 'lotus-preview-event', kind: 'error', payload: { message: { nested: true } } })
-    dispatch({ type: 'lotus-preview-event', kind: 'console', payload: { level: 'info', args: ['wrong source'] } }, window)
-    for (let index = 0; index < 100; index += 1) dispatch({ type: 'lotus-preview-event', kind: 'console', payload: { level: 'info', args: [`event-${index}`] } })
+    dispatch({ type: 'lotus-preview-event', channel: 'test-channel', kind: 'ready', payload: {} })
+    dispatch({ type: 'lotus-preview-event', channel: 'test-channel', kind: 'console', payload: { level: 'info', args: ['x'.repeat(20_000)] } })
+    dispatch({ type: 'lotus-preview-event', channel: 'test-channel', kind: 'error', payload: { message: { nested: true } } })
+    dispatch({ type: 'lotus-preview-event', channel: 'forged-channel', kind: 'console', payload: { level: 'info', args: ['forged'] } })
+    dispatch({ type: 'lotus-preview-event', channel: 'test-channel', kind: 'console', payload: { level: 'info', args: ['wrong source'] } }, window)
+    for (let index = 0; index < 100; index += 1) dispatch({ type: 'lotus-preview-event', channel: 'test-channel', kind: 'console', payload: { level: 'info', args: [`event-${index}`] } })
 
     expect(screen.queryByText(/wrong source/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/forged/)).not.toBeInTheDocument()
     expect(screen.queryByText(/nested/)).not.toBeInTheDocument()
     expect(screen.getAllByText(/event-/).length).toBeLessThanOrEqual(40)
   })

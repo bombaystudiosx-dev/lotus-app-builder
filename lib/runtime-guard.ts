@@ -22,8 +22,96 @@ export function hasStaticallyUnboundedLoop(source: string) {
   return /\bwhile\s*\(\s*(?:true|1)\s*\)|\bfor\s*\(\s*;\s*;\s*\)/.test(source)
 }
 
+function constantString(node: AstNode | undefined): string | null {
+  if (!node) return null
+  if (node.type === 'Literal' && typeof node.value === 'string') return node.value
+  if (node.type === 'TemplateLiteral' && Array.isArray(node.expressions) && node.expressions.length === 0 && Array.isArray(node.quasis)) {
+    return node.quasis.map((part) => (part as AstNode).value && typeof (part as AstNode).value === 'object' ? String(((part as AstNode).value as { cooked?: string }).cooked ?? '') : '').join('')
+  }
+  if (node.type === 'BinaryExpression' && node.operator === '+') {
+    const left = constantString(node.left as AstNode); const right = constantString(node.right as AstNode)
+    return left === null || right === null ? null : left + right
+  }
+  return null
+}
+
+function memberName(node: AstNode | undefined) {
+  if (!node || node.type !== 'MemberExpression') return null
+  return node.computed ? constantString(node.property as AstNode) : (node.property as AstNode | undefined)?.name as string | undefined ?? null
+}
+
+function identifierName(node: AstNode | undefined) {
+  return node?.type === 'Identifier' ? node.name as string : null
+}
+
+function isGlobalObject(node: AstNode | undefined, aliases: Set<string>): boolean {
+  const identifier = identifierName(node)
+  if (identifier && (['window', 'globalThis', 'self'].includes(identifier) || aliases.has(identifier))) return true
+  if (node?.type !== 'MemberExpression') return false
+  const property = memberName(node)
+  return property === 'defaultView' && identifierName(node.object as AstNode) === 'document' || property === 'window' && isGlobalObject(node.object as AstNode, aliases)
+}
+
+function isLocationReference(node: AstNode | undefined, globalAliases: Set<string>, locationAliases: Set<string>): boolean {
+  if (!node) return false
+  const identifier = identifierName(node)
+  if (identifier === 'location' || identifier && locationAliases.has(identifier)) return true
+  return node.type === 'MemberExpression' && memberName(node) === 'location' && (isGlobalObject(node.object as AstNode, globalAliases) || identifierName(node.object as AstNode) === 'document')
+}
+
 export function hasBlockedBrowserCapability(source: string) {
-  return /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|SharedWorker|Worker)\b|\bnavigator\s*\.\s*sendBeacon\b|\bwindow\s*\.\s*open\b|\b(?:window\s*\.\s*)?location\s*(?:=|\.\s*(?:assign|replace)\s*\()|\bdocument\s*\.\s*location\b/.test(source)
+  let ast: AstNode
+  try { ast = parse(source, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true }) as unknown as AstNode } catch { return false }
+  const globalAliases = new Set<string>()
+  const locationAliases = new Set<string>()
+  let aliasesChanged = true
+  while (aliasesChanged) {
+    aliasesChanged = false
+    walk(ast, (node) => {
+      if (node.type !== 'VariableDeclarator' && node.type !== 'AssignmentExpression') return
+      const target = (node.id ?? node.left) as AstNode | undefined
+      const value = (node.init ?? node.right) as AstNode | undefined
+      const name = identifierName(target)
+      if (!name || !value) return
+      if (!globalAliases.has(name) && isGlobalObject(value, globalAliases)) { globalAliases.add(name); aliasesChanged = true }
+      if (!locationAliases.has(name) && isLocationReference(value, globalAliases, locationAliases)) { locationAliases.add(name); aliasesChanged = true }
+    })
+  }
+  let blocked = false
+  walk(ast, (node) => {
+    if (blocked) return
+    if (node.type === 'ImportExpression') { blocked = true; return }
+    if (node.type === 'MemberExpression') {
+      const owner = node.object as AstNode | undefined
+      const property = memberName(node)
+      if (node.computed && isGlobalObject(owner, globalAliases) && property === null) { blocked = true; return }
+      if (isGlobalObject(owner, globalAliases) && property === 'navigation') { blocked = true; return }
+      if (isLocationReference(owner, globalAliases, locationAliases) && ['href', 'assign', 'replace', 'reload'].includes(property ?? '')) { blocked = true; return }
+    }
+    if (node.type === 'AssignmentExpression' || node.type === 'UpdateExpression') {
+      const target = (node.left ?? node.argument) as AstNode | undefined
+      if (isLocationReference(target, globalAliases, locationAliases) || target?.type === 'MemberExpression' && isLocationReference(target.object as AstNode, globalAliases, locationAliases) && ['href', 'assign', 'replace', 'reload'].includes(memberName(target) ?? '')) { blocked = true; return }
+      if (target?.type === 'MemberExpression' && ['innerHTML', 'outerHTML'].includes(memberName(target) ?? '')) { blocked = true; return }
+    }
+    if (node.type !== 'CallExpression' && node.type !== 'NewExpression') return
+    const callee = node.callee as AstNode | undefined
+    const direct = identifierName(callee)
+    const property = memberName(callee)
+    const owner = callee?.type === 'MemberExpression' ? callee.object as AstNode : undefined
+    if (['eval', 'Function', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker'].includes(direct ?? '')) { blocked = true; return }
+    if (isGlobalObject(owner, globalAliases) && ['eval', 'Function', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'open'].includes(property ?? '')) { blocked = true; return }
+    if (isLocationReference(owner, globalAliases, locationAliases) && ['assign', 'replace', 'reload'].includes(property ?? '')) { blocked = true; return }
+    const argumentsList = node.arguments as AstNode[] | undefined
+    if (argumentsList?.some((argument) => isLocationReference(argument, globalAliases, locationAliases))) { blocked = true; return }
+    if (property === 'navigate' || ['set', 'defineProperty'].includes(property ?? '') && isGlobalObject(argumentsList?.[0], globalAliases) && (constantString(argumentsList?.[1]) === null || ['location', 'navigation'].includes(constantString(argumentsList?.[1]) ?? ''))) { blocked = true; return }
+    if (property === 'sendBeacon' && identifierName(owner) === 'navigator') { blocked = true; return }
+    if (['insertAdjacentHTML', 'createContextualFragment', 'write', 'writeln'].includes(property ?? '')) { blocked = true; return }
+    if (['createElement', 'createElementNS'].includes(property ?? '') && identifierName(owner) === 'document') {
+      const requested = constantString(argumentsList?.[property === 'createElementNS' ? 1 : 0])
+      if (requested?.toLowerCase() === 'script') blocked = true
+    }
+  })
+  return blocked
 }
 
 function walk(value: unknown, visit: (node: AstNode) => void) {

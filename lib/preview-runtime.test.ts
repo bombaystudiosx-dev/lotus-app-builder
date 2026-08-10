@@ -108,7 +108,9 @@ describe('safe static preview assembly', () => {
     expect(output.html).toMatch(/\{__lotusGuard_[a-z\d]+\(\);console\.info\("running"\)\}/)
     expect(output.html).toContain('data-lotus-query="mode=one"')
     expect(output.html).toContain('data-lotus-fragment="section"')
-    expect(atob(output.html.match(/data:text\/html;base64,([^"#]+)/)?.[1] ?? '')).toContain('data:text/html;base64,')
+    expect(output.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining('metadata-only') })]))
+    const linkedHref = new JSDOM(output.html).window.document.querySelector('a')?.getAttribute('href') ?? ''
+    expect(atob(linkedHref.slice('data:text/html;base64,'.length).split('#', 1)[0])).toContain('data:text/html;base64,')
   })
 
   it('does not trust a user-authored runtime guard marker', () => {
@@ -152,9 +154,30 @@ describe('safe static preview assembly', () => {
     expect(output.html).toContain('Dynamic preview scripts are blocked')
   })
 
+  it('runtime-guards computed dynamic script creation and sanitizes computed innerHTML', async () => {
+    const output = assembleStaticPreview(files({
+      'index.html': `<main id="root"></main><script>
+        const tag = ['scr', 'ipt'].join('');
+        let dynamicBlocked = false;
+        try { document.createElement(tag) } catch (_) { dynamicBlocked = true }
+        const sink = ['inner', 'HTML'].join('');
+        document.body[sink] = '<p id="safe">ok</p><script id="pwned">document.body.dataset.pwned="true"<\\/script>';
+        document.body.dataset.dynamicBlocked = String(dynamicBlocked);
+        document.body.dataset.sanitized = String(!document.getElementById('pwned'));
+      </script>`,
+    }), 'index.html')
+    const dom = new JSDOM(output.html, { runScripts: 'dangerously' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(dom.window.document.body.dataset.dynamicBlocked).toBe('true')
+    expect(dom.window.document.body.dataset.sanitized).toBe('true')
+    expect(dom.window.document.body.dataset.pwned).toBeUndefined()
+    dom.window.close()
+  })
+
   it('blocks computed global navigation members that evade a text blacklist', () => {
     const output = assembleStaticPreview(files({
-      'index.html': `<script>globalThis['loc' + 'ation']['hr' + 'ef'] = 'https://evil.example'</script>`,
+      'index.html': `<script>const root = globalThis; const field = ['loc','ation'].join(''); root[field]['hr' + 'ef'] = 'https://evil.example'</script>`,
     }), 'index.html')
 
     expect(output.html).not.toContain('evil.example')

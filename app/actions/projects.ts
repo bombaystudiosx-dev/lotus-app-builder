@@ -22,6 +22,7 @@ function id() {
 }
 
 const projects = createProjectService(db)
+const activePreviewBuilds = new Map<string, { revision: number; controller: AbortController }>()
 
 function fileDto(file: Awaited<ReturnType<typeof projects.getFile>> extends infer Result ? NonNullable<Result> : never) {
   return { id: file.id, path: file.path, content: file.content, encoding: file.encoding as 'utf-8' | 'utf-16le', version: file.updatedAt.getTime() }
@@ -324,7 +325,9 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
   return { projectId, name: projectName, html, reply, version: updatedEntry.updatedAt.getTime() }
 }
 
-export async function buildProjectPreviewAction(projectId: string): Promise<PreviewBuild> {
+export async function buildProjectPreviewAction(projectId: string, revision = 0, sessionId = 'default'): Promise<PreviewBuild> {
+  if (!Number.isSafeInteger(revision) || revision < 0) throw new Error('Preview revision is invalid.')
+  if (!/^[a-z\d-]{1,64}$/i.test(sessionId)) throw new Error('Preview session is invalid.')
   const userId = await getUserId()
   const project = await projects.get(userId, projectId)
   if (!project || project.status !== 'active') throw new Error('Project not found.')
@@ -333,9 +336,21 @@ export async function buildProjectPreviewAction(projectId: string): Promise<Prev
   const input = files.map((file) => ({ path: file.path, content: file.content }))
   if (runtime.runtime === 'react') {
     const { bundleReactProject } = await import('@/lib/local-bundler')
-    return bundleReactProject(input, runtime.entryPath, { ownerKey: userId })
+    const key = `${userId}:${projectId}:${sessionId}`
+    const previous = activePreviewBuilds.get(key)
+    if (previous && previous.revision > revision) throw new Error('Local build superseded by a newer revision.')
+    previous?.controller.abort()
+    const controller = new AbortController()
+    const active = { revision, controller }
+    activePreviewBuilds.set(key, active)
+    try {
+      const result = await bundleReactProject(input, runtime.entryPath, { ownerKey: userId, signal: controller.signal })
+      return { ...result, revision }
+    } finally {
+      if (activePreviewBuilds.get(key) === active) activePreviewBuilds.delete(key)
+    }
   }
-  return assembleStaticPreview(input, runtime.entryPath)
+  return { ...assembleStaticPreview(input, runtime.entryPath), revision }
 }
 
 function stripFences(text: string): string {

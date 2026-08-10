@@ -467,6 +467,7 @@ export default function App({ initial }: LotusBuilderProps) {
   const imageInputRef   = useRef<HTMLInputElement>(null);
   const accountMenuRef  = useRef<HTMLDivElement>(null);
   const previewRequestRef = useRef(0);
+  const previewSessionRef = useRef(globalThis.crypto.randomUUID());
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior:"smooth" });
@@ -485,7 +486,7 @@ export default function App({ initial }: LotusBuilderProps) {
     if (!projectId) return;
     let cancelled = false;
     const timeout = window.setTimeout(() => {
-      buildProjectPreviewAction(projectId).then((result) => {
+      buildProjectPreviewAction(projectId, revision, previewSessionRef.current).then((result) => {
         if (cancelled || revision !== previewRequestRef.current) return;
         setGeneratedHtml(result.html);
         setPreviewDiagnostics(result.diagnostics);

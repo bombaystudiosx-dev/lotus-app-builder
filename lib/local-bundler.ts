@@ -155,7 +155,7 @@ export async function bundleReactProject(files: BuildFile[], entryPath: string, 
   const unsafeSource = files.find((file) => /\.[cm]?[jt]sx?$/.test(file.path) && hasStaticallyUnboundedLoop(file.content))
   if (unsafeSource) return { html: '', diagnostics: [{ severity: 'error', path: unsafeSource.path, message: 'Preview blocked a statically unbounded loop.' }] }
   const networkSource = files.find((file) => /\.[cm]?[jt]sx?$/.test(file.path) && hasBlockedBrowserCapability(file.content))
-  if (networkSource) return { html: '', diagnostics: [{ severity: 'error', path: networkSource.path, message: 'Preview blocked source access to navigation or network capabilities.' }] }
+  if (networkSource) return { html: '', diagnostics: [{ severity: 'error', path: networkSource.path, message: 'Preview blocked navigation or network access and dynamic code capabilities.' }] }
   const entry = extractReactEntry(files, entryPath)
   if (!entry) return { html: '', diagnostics: [{ severity: 'error', path: entryPath, message: 'React preview requires an HTML entry with one local module script.' }] }
 
