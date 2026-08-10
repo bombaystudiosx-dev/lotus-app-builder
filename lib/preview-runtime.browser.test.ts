@@ -48,14 +48,16 @@ describe('safe preview browser containment', () => {
 
   it('prevents dynamic event attributes and handler properties from executing outside instrumentation', async () => {
     const output = assembleStaticPreview(files({
-      'index.html': `<button id="attribute">Attribute</button><button id="namespaced">Namespaced</button><button id="property">Property</button><script>
+      'index.html': `<button id="attribute">Attribute</button><button id="namespaced">Namespaced</button><button id="property">Property</button><video id="specialized"></video><script>
         const attribute = document.getElementById('attribute');
         const namespaced = document.getElementById('namespaced');
         const property = document.getElementById('property');
+        const specialized = document.getElementById('specialized');
         try { attribute.setAttribute('onclick', 'document.body.dataset.attributeExecuted="true"') } catch (_) {}
         try { namespaced.setAttributeNS(null, ['on', 'click'].join(''), 'document.body.dataset.namespacedExecuted="true"') } catch (_) {}
         try { property.onclick = function () { document.body.dataset.propertyExecuted = 'true' } } catch (_) {}
-        attribute.click(); namespaced.click(); property.click();
+        try { specialized.onencrypted = function () { document.body.dataset.specializedExecuted = 'true' } } catch (_) {}
+        attribute.click(); namespaced.click(); property.click(); specialized.dispatchEvent(new Event('encrypted'));
         document.body.dataset.handlerProbeComplete = 'true';
       </script>`,
     }), 'index.html')
@@ -67,6 +69,7 @@ describe('safe preview browser containment', () => {
         attributeExecuted: dom.window.document.body.dataset.attributeExecuted,
         namespacedExecuted: dom.window.document.body.dataset.namespacedExecuted,
         propertyExecuted: dom.window.document.body.dataset.propertyExecuted,
+        specializedExecuted: dom.window.document.body.dataset.specializedExecuted,
         attributeHandler: dom.window.document.getElementById('attribute')?.getAttribute('onclick'),
         namespacedHandler: dom.window.document.getElementById('namespaced')?.getAttribute('onclick'),
         propertyHandler: dom.window.document.getElementById('property')?.getAttribute('onclick'),
@@ -76,6 +79,7 @@ describe('safe preview browser containment', () => {
         attributeExecuted: undefined,
         namespacedExecuted: undefined,
         propertyExecuted: undefined,
+        specializedExecuted: undefined,
         attributeHandler: null,
         namespacedHandler: null,
         propertyHandler: null,
