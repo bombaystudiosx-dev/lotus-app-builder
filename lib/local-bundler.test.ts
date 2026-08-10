@@ -38,4 +38,14 @@ describe('isolated local React bundler', () => {
   it('rejects input and output beyond fixed limits before it can exhaust memory', async () => {
     await expect(bundleReactProject([{ path: 'src/main.tsx', content: 'x'.repeat(1_100_000) }], 'src/main.tsx')).rejects.toThrow('input limit')
   })
+
+  it('rejects an obvious unbounded loop before shipping the bundle to the browser thread', async () => {
+    const result = await bundleReactProject([
+      reactStarter[0],
+      { path: 'src/main.tsx', content: 'while (true) {}' },
+    ], 'index.html')
+
+    expect(result.html).toBe('')
+    expect(result.diagnostics[0].message).toContain('unbounded loop')
+  })
 })

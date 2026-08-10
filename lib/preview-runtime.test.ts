@@ -53,6 +53,17 @@ describe('safe static preview assembly', () => {
     expect(output.html).toContain('lotus-preview-event')
   })
 
+  it('removes statically unbounded loops before preview JavaScript reaches the browser thread', () => {
+    const output = assembleStaticPreview(files({
+      'index.html': '<script src="runaway.js"></script><script>for (;;) {}</script>',
+      'runaway.js': 'while (true) {}',
+    }), 'index.html')
+
+    expect(output.html).not.toContain('while (true)')
+    expect(output.html).not.toContain('for (;;)')
+    expect(output.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining('unbounded loop') })]))
+  })
+
   it('calculates device, orientation, zoom, and bounded custom viewports', () => {
     expect(previewViewport({ device: 'phone', orientation: 'portrait', zoom: 100 })).toEqual({ width: 390, height: 844, scale: 1 })
     expect(previewViewport({ device: 'tablet', orientation: 'landscape', zoom: 75 })).toEqual({ width: 1024, height: 768, scale: 0.75 })
