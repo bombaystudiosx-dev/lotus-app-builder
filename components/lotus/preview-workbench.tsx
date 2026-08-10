@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ExternalLink, Monitor, RefreshCw, RotateCw, Smartphone, Tablet } from 'lucide-react'
+import { Download, Monitor, RefreshCw, RotateCw, Smartphone, Tablet } from 'lucide-react'
 import { LivePreview } from '@/components/lotus/live-preview'
 import { previewViewport, type PreviewDevice, type PreviewDiagnostic, type PreviewOrientation } from '@/lib/preview-runtime'
 
@@ -44,21 +44,30 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
   const [runtimeError, setRuntimeError] = useState<RuntimeError | null>(null)
   const frameRef = useRef<HTMLIFrameElement>(null)
   const nextConsoleId = useRef(0)
+  const messageBudget = useRef({ startedAt: 0, count: 0 })
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
       if (event.source !== frameRef.current?.contentWindow || event.data?.type !== 'lotus-preview-event') return
+      let encoded = ''
+      try { encoded = JSON.stringify(event.data) } catch { return }
+      if (encoded.length > 8_192) return
+      const now = Date.now()
+      if (now - messageBudget.current.startedAt > 1_000) messageBudget.current = { startedAt: now, count: 0 }
+      if (messageBudget.current.count++ >= 40) return
       if (event.data.kind === 'console') {
         const payload = event.data.payload as { level?: string; args?: unknown[] }
-        const text = (payload.args ?? []).map(String).join(' ')
+        if (!['log', 'info', 'warn', 'error'].includes(payload?.level ?? '') || !Array.isArray(payload?.args) || payload.args.length > 10 || payload.args.some((item) => typeof item !== 'string' || item.length > 1_000)) return
+        const text = payload.args.join(' ')
         setConsoleEntries((entries) => [...entries.slice(-199), { id: nextConsoleId.current++, level: payload.level ?? 'log', text }])
       }
       if (event.data.kind === 'error') {
         const payload = event.data.payload as RuntimeError
+        if (!payload || typeof payload.message !== 'string' || payload.message.length > 1_000 || (payload.source !== undefined && (typeof payload.source !== 'string' || payload.source.length > 500)) || (payload.line !== undefined && !Number.isFinite(payload.line)) || (payload.column !== undefined && !Number.isFinite(payload.column))) return
         setRuntimeError(payload)
         setConsoleEntries((entries) => [...entries.slice(-199), { id: nextConsoleId.current++, level: 'error', text: payload.message }])
       }
-      if (event.data.kind === 'ready') setRuntimeError(null)
+      if (event.data.kind === 'ready' && event.data.payload && typeof event.data.payload === 'object') setRuntimeError(null)
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
@@ -73,8 +82,13 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
     setRuntimeError(null)
   }
 
-  function openPreview() {
-    window.open(`data:text/html;charset=utf-8,${encodeURIComponent(displayHtml)}`, '_blank', 'noopener,noreferrer')
+  function downloadPreview() {
+    const url = URL.createObjectURL(new Blob([displayHtml], { type: 'text/html' }))
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = 'lotus-preview.html'
+    anchor.click()
+    URL.revokeObjectURL(url)
   }
 
   return <section aria-label="Preview workbench" className="flex h-full min-h-0 flex-col bg-[var(--background)]">
@@ -95,7 +109,7 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
       <div className="ml-auto flex items-center gap-1">
         <label className="flex items-center gap-1 text-[10px] text-[var(--muted-foreground)]"><input aria-label="Auto-refresh preview" type="checkbox" checked={autoRefresh} onChange={(event) => { if (!event.target.checked) setManualHtml(html); setAutoRefresh(event.target.checked) }}/> Auto</label>
         <button type="button" aria-label="Refresh preview" onClick={refresh} className="rounded-md p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--muted)]"><RefreshCw size={13}/></button>
-        <button type="button" aria-label="Open preview in new window" onClick={openPreview} className="rounded-md p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--muted)]"><ExternalLink size={13}/></button>
+        <button type="button" aria-label="Download preview HTML" onClick={downloadPreview} className="rounded-md p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--muted)]"><Download size={13}/></button>
       </div>
     </div>
 

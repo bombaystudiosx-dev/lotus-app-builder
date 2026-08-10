@@ -24,6 +24,17 @@ describe('isolated local React bundler', () => {
     dom.window.close()
   })
 
+  it('structurally recognizes an unquoted local module entry without enabling filesystem resolution', async () => {
+    const result = await bundleReactProject([
+      { ...reactStarter[0], content: '<main id=root></main><script type=module src=/src/main.tsx></script>' },
+      { path: 'src/main.tsx', content: "document.getElementById('root').textContent = 'unquoted entry'" },
+    ], 'index.html')
+
+    expect(result.diagnostics).toEqual([])
+    expect(result.html).toContain('unquoted entry')
+    expect(result.html).not.toContain('src="/src/main.tsx"')
+  })
+
   it('reports broken source without leaking worker details', async () => {
     const result = await bundleReactProject([
       ...reactStarter.slice(0, 1),
@@ -38,6 +49,12 @@ describe('isolated local React bundler', () => {
   it('terminates and cleans up workers that exceed deterministic time limits', async () => {
     await expect(bundleReactProject(reactStarter, 'index.html', { timeoutMs: 1 })).rejects.toThrow('timed out')
     expect(getActiveBuildCount()).toBe(0)
+  })
+
+  it('cancels a requested build before allocating a worker slot', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(bundleReactProject(reactStarter, 'index.html', { signal: controller.signal })).rejects.toThrow('cancelled')
   })
 
   it('rejects input and output beyond fixed limits before it can exhaust memory', async () => {

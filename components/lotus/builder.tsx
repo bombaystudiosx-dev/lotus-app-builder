@@ -3,10 +3,10 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  Send, Smartphone, Tablet, Monitor, Sparkles,
+  Send, Sparkles,
   RefreshCw, Code2, Zap, ImageIcon, X, ChevronDown,
   Plus, Upload, FileText, Brain, Bot, Cpu, Undo2, Redo2,
-  Globe, Copy, Eye, Check, RotateCcw,
+  Download, Copy, Eye, Check, RotateCcw,
   Plug,
   LogOut,
 } from "lucide-react";
@@ -143,20 +143,20 @@ function fileIcon(mime: string) {
   return <FileText size={10}/>;
 }
 
-// Data URLs have an opaque origin, keeping the full-screen preview away from
-// Lotus cookies and storage just like the sandboxed iframe.
-function openGeneratedApp(html: string | null) {
-  if (!html) { toast.error("Generate an app first — then you can open it."); return; }
-  window.open(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`, "_blank", "noopener,noreferrer");
+function downloadGeneratedApp(html: string | null) {
+  if (!html) { toast.error("Generate an app first — then you can export it."); return; }
+  const url = URL.createObjectURL(new Blob([html], { type:"text/html" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "lotus-preview.html";
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
-
-// Copy a shareable data URL of the generated app to the clipboard.
-async function copyGeneratedAppLink(html: string | null) {
-  if (!html) { toast.error("Generate an app first — then you can copy its link."); return; }
-  const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+async function copyGeneratedAppSource(html: string | null) {
+  if (!html) { toast.error("Generate an app first — then you can copy its HTML."); return; }
   try {
-    await navigator.clipboard.writeText(dataUrl);
-    toast.success("App link copied to your clipboard.");
+    await navigator.clipboard.writeText(html);
+    toast.success("Preview HTML copied to your clipboard.");
   } catch {
     toast.error("Could not access the clipboard in this context.");
   }
@@ -171,7 +171,6 @@ function EmptyPreview() {
     </div>
   );
 }
-
 // ─── Deployed panel ───────────────────────────────────────────────────────────
 function DeployedPanel({ html, projectName }:{ html:string|null; projectName:string }) {
   const ready = !!html;
@@ -186,20 +185,20 @@ function DeployedPanel({ html, projectName }:{ html:string|null; projectName:str
         </h3>
         <p style={{ fontSize:12, color:"var(--muted-foreground)", maxWidth:300, lineHeight:1.6 }}>
           {ready
-            ? "Your app is built and running. Open it full-screen in a new tab or copy a local share link."
-            : "Describe an app in chat to generate it — then you can open it live or copy a local share link."}
+            ? "Your app is built and ready to export as an inert HTML file."
+            : "Describe an app in chat to generate it — then you can export or copy its HTML."}
         </p>
       </div>
       <div className="flex flex-wrap gap-2 mt-2 justify-center">
-        <button onClick={()=>openGeneratedApp(html)} disabled={!ready}
+        <button onClick={()=>downloadGeneratedApp(html)} disabled={!ready}
           className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold transition-all hover:opacity-80"
           style={{ background:"var(--primary)", color:"var(--primary-foreground)", opacity:ready?1:0.5, cursor:ready?"pointer":"not-allowed" }}>
-          <Globe size={12}/> Open Live App
+          <Download size={12}/> Download Preview
         </button>
-        <button onClick={()=>copyGeneratedAppLink(html)} disabled={!ready}
+        <button onClick={()=>copyGeneratedAppSource(html)} disabled={!ready}
           className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold transition-all hover:opacity-80"
           style={{ background:"var(--muted)", color:"var(--muted-foreground)", opacity:ready?1:0.5, cursor:ready?"pointer":"not-allowed" }}>
-          <Copy size={12}/> Copy Link
+          <Copy size={12}/> Copy HTML
         </button>
       </div>
     </div>
@@ -357,16 +356,16 @@ function ViewAppMenu({ onClose, html }:{ onClose:()=>void; html:string|null }) {
           <div>
             <label style={{ fontSize:10, fontWeight:600, color:"var(--muted-foreground)", letterSpacing:"0.05em", textTransform:"uppercase", display:"block", marginBottom:4 }}>Status</label>
             <div className="rounded-lg px-3 py-2 text-xs" style={{ background:"var(--background)", border:"1px solid var(--border)", color:ready?"var(--foreground)":"var(--muted-foreground)" }}>
-              {ready ? "Your app is built and ready to open in a new browser tab." : "No app generated yet — describe one in chat first."}
+              {ready ? "Your app is built and ready to export safely." : "No app generated yet — describe one in chat first."}
             </div>
           </div>
           <div className="flex gap-2 mt-1">
-            <button onClick={()=>openGeneratedApp(html)} disabled={!ready}
+            <button onClick={()=>downloadGeneratedApp(html)} disabled={!ready}
               className="flex-1 py-2 rounded-xl text-xs font-semibold transition-all hover:opacity-80"
-              style={{ background:"var(--primary)", color:"var(--primary-foreground)", opacity:ready?1:0.5, cursor:ready?"pointer":"not-allowed" }}>Open Web App</button>
-            <button onClick={()=>copyGeneratedAppLink(html)} disabled={!ready}
+              style={{ background:"var(--primary)", color:"var(--primary-foreground)", opacity:ready?1:0.5, cursor:ready?"pointer":"not-allowed" }}>Download Preview</button>
+            <button onClick={()=>copyGeneratedAppSource(html)} disabled={!ready}
               className="flex-1 py-2 rounded-xl text-xs font-semibold transition-all hover:opacity-80"
-              style={{ background:"var(--muted)", color:"var(--muted-foreground)", opacity:ready?1:0.5, cursor:ready?"pointer":"not-allowed" }}>Copy Link</button>
+              style={{ background:"var(--muted)", color:"var(--muted-foreground)", opacity:ready?1:0.5, cursor:ready?"pointer":"not-allowed" }}>Copy HTML</button>
           </div>
         </div>
       </div>
@@ -429,7 +428,6 @@ export default function App({ initial }: LotusBuilderProps) {
   const [entryPath, setEntryPath] = useState(initial.entryPath);
   const [input,     setInput]     = useState("");
   const [isTyping,  setIsTyping]  = useState(false);
-  const [device,    setDevice]    = useState<DeviceMode>(initial.defaultDevice);
   const [view,      setView]      = useState<BuildView>("preview");
 
   // Data
@@ -468,26 +466,34 @@ export default function App({ initial }: LotusBuilderProps) {
   const fileInputRef    = useRef<HTMLInputElement>(null);
   const imageInputRef   = useRef<HTMLInputElement>(null);
   const accountMenuRef  = useRef<HTMLDivElement>(null);
+  const previewRequestRef = useRef(0);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior:"smooth" });
   }, [messages, isTyping]);
 
   useEffect(() => {
+    const revision = ++previewRequestRef.current;
     if (initial.runtime === "static") {
       const result = assembleStaticPreview(builderFiles, entryPath);
-      setGeneratedHtml(result.html);
-      setPreviewDiagnostics(result.diagnostics);
+      if (revision === previewRequestRef.current) {
+        setGeneratedHtml(result.html);
+        setPreviewDiagnostics(result.diagnostics);
+      }
       return;
     }
     if (!projectId) return;
+    let cancelled = false;
     const timeout = window.setTimeout(() => {
       buildProjectPreviewAction(projectId).then((result) => {
+        if (cancelled || revision !== previewRequestRef.current) return;
         setGeneratedHtml(result.html);
         setPreviewDiagnostics(result.diagnostics);
-      }).catch((error: unknown) => setPreviewDiagnostics([{ severity:"error", message:error instanceof Error ? error.message : "Local build failed." }]));
+      }).catch((error: unknown) => {
+        if (!cancelled && revision === previewRequestRef.current) setPreviewDiagnostics([{ severity:"error", message:error instanceof Error ? error.message : "Local build failed." }]);
+      });
     }, 250);
-    return () => window.clearTimeout(timeout);
+    return () => { cancelled = true; window.clearTimeout(timeout); };
   }, [builderFiles, entryPath, initial.runtime, projectId]);
 
   // Close the account menu on outside click.
@@ -534,9 +540,11 @@ export default function App({ initial }: LotusBuilderProps) {
       setProjectName(res.name);
       const nextFiles = builderFiles.map(file => file.path === entryPath ? { ...file, content: res.html, version: res.version } : file);
       setBuilderFiles(nextFiles);
-      const preview = assembleStaticPreview(nextFiles, entryPath);
-      setGeneratedHtml(preview.html);
-      setPreviewDiagnostics(preview.diagnostics);
+      const preview = initial.runtime === "static" ? assembleStaticPreview(nextFiles, entryPath) : { html: generatedHtml, diagnostics: previewDiagnostics };
+      if (initial.runtime === "static") {
+        setGeneratedHtml(preview.html);
+        setPreviewDiagnostics(preview.diagnostics);
+      }
       setView("preview");
       setMessages(p=>[...p,{ id:(Date.now()+1).toString(), role:"assistant", content:res.reply, ts:new Date() }]);
       setHistory(h=>[...h.slice(0,historyIdx+1), { label:safeText, html:preview.html }]);
@@ -596,22 +604,6 @@ export default function App({ initial }: LotusBuilderProps) {
                 style={{ fontSize:13, fontWeight:500, color:"var(--muted-foreground)" }}>{projectName}</span>
             </>
           )}
-        </div>
-
-        {/* Device switcher */}
-        <div className="flex items-center gap-1 px-1.5 py-1.5 rounded-xl" style={{ background:"var(--muted)", border:"1px solid var(--border)" }}>
-          {(["phone","tablet","desktop"] as DeviceMode[]).map(d=>{
-            const icons = { phone:<Smartphone size={12}/>, tablet:<Tablet size={12}/>, desktop:<Monitor size={12}/> };
-            const labels = { phone:"Mobile", tablet:"Tablet", desktop:"Desktop" };
-            const active = device===d;
-            return (
-              <motion.button key={d} onClick={()=>setDevice(d)} whileTap={{ scale:0.96 }}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
-                style={{ background:active?"var(--card)":"transparent", color:active?"var(--foreground)":"var(--muted-foreground)", boxShadow:active?"0 1px 4px rgba(0,0,0,0.08)":"none" }}>
-                {icons[d]}<span className="hidden sm:inline">{labels[d]}</span>
-              </motion.button>
-            );
-          })}
         </div>
 
         {/* Right actions */}
@@ -882,13 +874,14 @@ export default function App({ initial }: LotusBuilderProps) {
 
 
           {/* View content */}
-          {view==="preview" && generatedHtml && <div className="min-h-0 flex-1"><PreviewWorkbench key={`${device}-${dragKey}`} html={generatedHtml} diagnostics={previewDiagnostics} initialDevice={device}/></div>}
-          {view==="preview" && !generatedHtml && <div className="min-h-0 flex-1"><EmptyPreview/></div>}
+          {view==="preview" && (generatedHtml || previewDiagnostics.length > 0) && <div className="min-h-0 flex-1"><PreviewWorkbench key={dragKey} html={generatedHtml ?? ""} diagnostics={previewDiagnostics} initialDevice={initial.defaultDevice}/></div>}
+          {view==="preview" && !generatedHtml && previewDiagnostics.length === 0 && <div className="min-h-0 flex-1"><EmptyPreview/></div>}
 
           {projectId
             ? <div className={view === "code" ? "flex min-h-0 flex-1" : "hidden"} aria-hidden={view !== "code"}>
               <EditorWorkspace
                 active={view === "code"}
+                runtime={initial.runtime}
                 projectId={projectId}
                 files={builderFiles}
                 entryPath={entryPath}
@@ -922,9 +915,6 @@ export default function App({ initial }: LotusBuilderProps) {
                 ? <><div className="w-1.5 h-1.5 rounded-full" style={{ background:"#6BCB77" }}/><span style={{ fontSize:9, color:"var(--muted-foreground)" }}>Saved</span></>
                 : <><motion.div className="w-1.5 h-1.5 rounded-full" style={{ background:"var(--accent)" }} animate={{ opacity:[1,0.3,1] }} transition={{ duration:1, repeat:Infinity }}/><span style={{ fontSize:9, color:"var(--muted-foreground)" }}>Saving…</span></>
               }
-              <span style={{ fontSize:9, color:"var(--muted-foreground)", marginLeft:6, fontFamily:"DM Mono,monospace" }}>
-                {DEVICE_CONFIGS_STATUS[device]}
-              </span>
             </div>
           </div>
         </main>
@@ -940,14 +930,10 @@ export default function App({ initial }: LotusBuilderProps) {
       </AnimatePresence>
 
       {/* Click-away to close popovers */}
-      {(showPlus||showModel) && <div className="fixed inset-0 z-30" onClick={()=>{ setShowPlus(false); setShowModel(false); }}/>}
+      {(showPlus||showModel) && (
+        <div className="fixed inset-0 z-30" onClick={()=>{ setShowPlus(false); setShowModel(false); }}/>
+      )}
     </div>
   );
 }
-
-// Status line dimensions per device
-const DEVICE_CONFIGS_STATUS: Record<DeviceMode,string> = {
-  phone:   "375 × 720",
-  tablet:  "768 × 600",
-  desktop: "1100 × 620",
-};
+export type { LotusBuilderProps };

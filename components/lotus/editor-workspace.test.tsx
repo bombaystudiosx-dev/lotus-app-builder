@@ -57,6 +57,21 @@ describe('EditorWorkspace keyboard and data-loss boundaries', () => {
     expect(onPreviewChange).toHaveBeenCalledWith(expect.stringContaining('<main>Changed</main>'))
   })
 
+  it('never sends raw React TSX through the static preview assembler', async () => {
+    const reactFiles = [{ id: 'tsx', path: 'src/main.tsx', content: 'const App = () => <main>React</main>', encoding: 'utf-8' as const }]
+    actions.update.mockResolvedValue({ ...reactFiles[0], content: 'const App = () => <main>Changed</main>' })
+    const onPreviewChange = vi.fn()
+    const onFilesChange = vi.fn()
+    render(<EditorWorkspace runtime="react" projectId="lotus" files={reactFiles} entryPath="src/main.tsx" initialFontSize={14} onPreviewChange={onPreviewChange} onFilesChange={onFilesChange} />)
+
+    expect(onPreviewChange).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText('Code editor src/main.tsx'), { target: { value: 'const App = () => <main>Changed</main>' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save file' }))
+
+    await waitFor(() => expect(onFilesChange).toHaveBeenCalled())
+    expect(onPreviewChange).not.toHaveBeenCalled()
+  })
+
   it('preserves a dirty buffer while renaming by stable id', async () => {
     vi.spyOn(window, 'prompt').mockReturnValue('src/index.html')
     render(<EditorWorkspace projectId="lotus" files={files} entryPath="index.html" initialFontSize={14} onPreviewChange={vi.fn()} />)

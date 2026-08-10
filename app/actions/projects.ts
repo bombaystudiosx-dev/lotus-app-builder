@@ -333,7 +333,7 @@ export async function buildProjectPreviewAction(projectId: string): Promise<Prev
   const input = files.map((file) => ({ path: file.path, content: file.content }))
   if (runtime.runtime === 'react') {
     const { bundleReactProject } = await import('@/lib/local-bundler')
-    return bundleReactProject(input, runtime.entryPath)
+    return bundleReactProject(input, runtime.entryPath, { ownerKey: userId })
   }
   return assembleStaticPreview(input, runtime.entryPath)
 }

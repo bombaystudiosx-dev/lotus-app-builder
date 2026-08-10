@@ -32,6 +32,7 @@ import {
 
 interface EditorWorkspaceProps {
   active?: boolean
+  runtime?: 'static' | 'react'
   projectId: string
   files: EditorFile[]
   entryPath: string
@@ -76,7 +77,7 @@ function persisted(projectId: string): PersistedEditorState {
   }
 }
 
-export function EditorWorkspace({ active: workspaceActive = true, projectId, files: initialFiles, entryPath, initialFontSize, onPreviewChange, onFilesChange, onEntryPathChange }: EditorWorkspaceProps) {
+export function EditorWorkspace({ active: workspaceActive = true, runtime = 'static', projectId, files: initialFiles, entryPath, initialFontSize, onPreviewChange, onFilesChange, onEntryPathChange }: EditorWorkspaceProps) {
   const [files, setFiles] = useState(initialFiles)
   const [lastInitialFiles, setLastInitialFiles] = useState(initialFiles)
   const [session, setSession] = useState(() => createEditorSession(initialFiles, projectId, { ...persisted(projectId), fontSize: persisted(projectId).fontSize ?? initialFontSize }))
@@ -117,14 +118,14 @@ export function EditorWorkspace({ active: workspaceActive = true, projectId, fil
     }
     return syntax
   }, [currentEntryPath, session.documents])
-  const preview = useMemo(() => buildPreviewDocument(Object.values(session.documents), currentEntryPath), [currentEntryPath, session.documents])
+  const preview = useMemo(() => runtime === 'static' ? buildPreviewDocument(Object.values(session.documents), currentEntryPath) : null, [currentEntryPath, runtime, session.documents])
   const visibleFiles = useMemo(() => Object.values(session.documents).sort((a, b) => a.path.localeCompare(b.path)), [session.documents])
   const effectiveTreeFocusId = visibleFiles.some((file) => file.id === treeFocusId)
     ? treeFocusId
     : visibleFiles.some((file) => file.id === active?.id) ? active?.id ?? null : visibleFiles[0]?.id ?? null
 
   useEffect(() => { onPreviewChangeRef.current = onPreviewChange }, [onPreviewChange])
-  useEffect(() => onPreviewChangeRef.current(preview), [preview])
+  useEffect(() => { if (preview !== null) onPreviewChangeRef.current(preview) }, [preview])
 
   useEffect(() => {
     localStorage.setItem(`lotus:editor:${projectId}`, JSON.stringify(persistedEditorState(session)))
@@ -178,12 +179,12 @@ export function EditorWorkspace({ active: workspaceActive = true, projectId, fil
       const nextFiles = files.map((file) => file.id === active.id ? serverFile : file)
       setFiles(nextFiles)
       onFilesChange?.(nextFiles)
-      onPreviewChange(buildPreviewDocument(nextFiles, currentEntryPath))
+      if (runtime === 'static') onPreviewChange(buildPreviewDocument(nextFiles, currentEntryPath))
       toast.success(`${active.path} saved`)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not save the file.')
     }
-  }, [active, currentEntryPath, files, onFilesChange, onPreviewChange, projectId])
+  }, [active, currentEntryPath, files, onFilesChange, onPreviewChange, projectId, runtime])
 
   useEffect(() => {
     if (!workspaceActive) return
@@ -271,7 +272,7 @@ export function EditorWorkspace({ active: workspaceActive = true, projectId, fil
       setFiles(nextFiles)
       setSession((current) => removeDocument(current, active.id, { discard: true }).state)
       onFilesChange?.(nextFiles)
-      onPreviewChange(buildPreviewDocument(nextFiles, currentEntryPath))
+      if (runtime === 'static') onPreviewChange(buildPreviewDocument(nextFiles, currentEntryPath))
       recordOperation({ kind: 'trash', fileId: active.id })
     } catch (error) { toast.error(error instanceof Error ? error.message : 'Could not delete the file.') }
   }
@@ -318,7 +319,7 @@ export function EditorWorkspace({ active: workspaceActive = true, projectId, fil
       setFiles(nextFiles)
       setOperationIndex(direction === 'undo' ? index - 1 : index)
       onFilesChange?.(nextFiles)
-      onPreviewChange(buildPreviewDocument(nextFiles, nextEntryPath))
+      if (runtime === 'static') onPreviewChange(buildPreviewDocument(nextFiles, nextEntryPath))
     } catch (error) { toast.error(error instanceof Error ? error.message : `Could not ${direction} the file operation.`) }
   }
 
@@ -473,7 +474,11 @@ export function EditorWorkspace({ active: workspaceActive = true, projectId, fil
       </section>
 
       <button type="button" role="separator" aria-label="Resize preview" aria-orientation="vertical" aria-valuemin={260} aria-valuemax={720} aria-valuenow={session.layout.previewWidth} tabIndex={0} onPointerDown={(event) => beginResize('previewWidth', event)} onKeyDown={(event) => { if (event.key === 'ArrowLeft') resize('previewWidth', 16); if (event.key === 'ArrowRight') resize('previewWidth', -16) }} className="w-1 cursor-col-resize bg-[var(--border)] hover:bg-[var(--accent)]"/>
-      <aside aria-label="Live code preview" className="shrink-0 bg-white" style={{ width: session.layout.previewWidth }}><LivePreview html={preview}/></aside>
+      <aside aria-label="Live code preview" className="shrink-0 bg-white" style={{ width: session.layout.previewWidth }}>
+        {preview === null
+          ? <div className="flex h-full items-center justify-center p-6 text-center text-xs text-slate-500">Save changes to rebuild the isolated React preview in the Preview tab.</div>
+          : <LivePreview html={preview}/>}
+      </aside>
     </div>
 
     {problemsOpen && <button type="button" role="separator" aria-label="Resize problems panel" aria-orientation="horizontal" aria-valuemin={96} aria-valuemax={320} aria-valuenow={session.layout.problemsHeight} onPointerDown={(event) => beginResize('problemsHeight', event)} onKeyDown={(event) => { if (event.key === 'ArrowUp') resize('problemsHeight', 16); if (event.key === 'ArrowDown') resize('problemsHeight', -16) }} className="h-1 w-full cursor-row-resize bg-[var(--border)] hover:bg-[var(--accent)]"/>}

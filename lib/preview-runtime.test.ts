@@ -99,14 +99,41 @@ describe('safe static preview assembly', () => {
 
   it('instruments computed loops and recursively assembles safe local links while preserving reference metadata', () => {
     const output = assembleStaticPreview(files({
-      'index.html': '<a href="pages/a.html?mode=one#section">A</a><script>while (Date.now()) {}</script>',
+      'index.html': '<a href="pages/a.html?mode=one#section">A</a><script>while (Date.now()) console.info("running")</script>',
       'pages/a.html': '<a href="b.html">B</a>',
       'pages/b.html': '<p>Deep page</p>',
     }), 'index.html')
 
     expect(output.html).toContain('__lotusGuard')
+    expect(output.html).toMatch(/\{__lotusGuard_[a-z\d]+\(\);console\.info\("running"\)\}/)
     expect(output.html).toContain('data-lotus-query="mode=one"')
     expect(output.html).toContain('data-lotus-fragment="section"')
     expect(atob(output.html.match(/data:text\/html;base64,([^"#]+)/)?.[1] ?? '')).toContain('data:text/html;base64,')
+  })
+
+  it('does not trust a user-authored runtime guard marker', () => {
+    const output = assembleStaticPreview(files({
+      'index.html': '<script>/* lotus-runtime-guard */ while (Date.now()) {}</script>',
+    }), 'index.html')
+
+    expect(output.html.match(/lotus-runtime-guard/g)?.length).toBe(2)
+    expect(output.html).toMatch(/while \(Date\.now\(\)\) \{__lotusGuard_[a-z\d]+\(\);\}/)
+  })
+
+  it('removes document and script navigation, form targets, popup targets, and network hints', () => {
+    const output = assembleStaticPreview(files({
+      'index.html': '<meta http-equiv=refresh content="0;url=https://evil.example"><form action=https://evil.example><button formaction=https://evil.example>Go</button></form><a href=https://evil.example target=_blank ping=https://evil.example>Leave</a><img src=icon.svg srcset="https://evil.example/x 2x"><script>window.open("https://evil.example")</script>',
+      'icon.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>',
+    }), 'index.html')
+    const dom = new JSDOM(output.html)
+
+    expect(dom.window.document.querySelector('meta[http-equiv="refresh"]')).toBeNull()
+    expect(dom.window.document.querySelector('form')?.hasAttribute('action')).toBe(false)
+    expect(dom.window.document.querySelector('button')?.hasAttribute('formaction')).toBe(false)
+    expect(dom.window.document.querySelector('a')?.getAttribute('href')).toBe('#')
+    expect(dom.window.document.querySelector('a')?.hasAttribute('target')).toBe(false)
+    expect(dom.window.document.querySelector('img')?.hasAttribute('srcset')).toBe(false)
+    expect(output.html).not.toContain('window.open')
+    expect(output.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining('navigation or network') })]))
   })
 })
