@@ -139,3 +139,63 @@ Fix Round 1 commits:
 - `48bcefb` — RED data-loss, reconciliation, diagnostics, preview, service, and accessibility regressions.
 - `b924d36` — GREEN implementation for all Critical and Important findings.
 - `ea0de1a` — mounted workspace view-transition regression coverage.
+
+## Fix Round 2
+
+### Important findings resolved
+
+- `runBuild` now reads `project_runtime.entryPath`, resolves that exact normalized entry file, and captures its `updatedAt` before the potentially long model generation call. The generated write passes that captured value as `expectedUpdatedAt`; a concurrent editor save therefore causes the generation write to fail without overwriting the editor result or persisting a misleading assistant-success reply. Renamed entries are never redirected to a hardcoded `index.html`.
+- Roving file-tree focus now derives a valid fallback when the focused id disappears: the remaining active file when possible, otherwise the first remaining sorted file. One tree item always retains `tabIndex=0` while files remain.
+- `EditorWorkspace` now receives an explicit `active` state from the builder. Inactive Preview/Deployed-style workspaces remove their global shortcut listener and close any open command palette, so `Ctrl+S`, `Ctrl+Shift+P`, and `Ctrl+Shift+T` are not prevented or consumed outside Code view.
+- HTML, CSS, JavaScript, and TypeScript diagnostics now use the official CodeMirror/Lezer language parsers rather than tag/delimiter heuristics. Parser error nodes supply stable source positions and surrounding snippets. Valid JavaScript regex literals and tag-like strings inside `<script>` no longer create false problems, while invalid grammar remains reported.
+- `@codemirror/language` is now an explicit production dependency supporting the parser-backed diagnostic boundary.
+
+### TDD evidence
+
+RED checkpoint `f97e930`:
+
+- Command: `pnpm vitest run app/actions/projects.test.ts lib/editor-workspace.test.ts components/lotus/editor-workspace.test.tsx`
+- Result: expected RED, 6 failed and 36 passed across 3 files.
+- Failures directly reproduced hardcoded entry lookup, missing parser errors, orphaned tree roving focus, and inactive global-shortcut consumption.
+
+GREEN checkpoint `f77317b`:
+
+- Focused command: `pnpm vitest run app/actions/projects.test.ts lib/editor-workspace.test.ts components/lotus/editor-workspace.test.tsx`
+- Result: PASS, 3 files and 42 tests.
+- Command: `pnpm run typecheck`; result PASS.
+- Command: `pnpm run lint`; result PASS with no warnings or errors.
+
+New regressions cover:
+
+- renamed runtime-entry generation and optimistic `expectedUpdatedAt` forwarding;
+- stale concurrent generation rejection with one attempted write, no overwrite, and no assistant-success insert;
+- deletion of the currently focused tree item;
+- palette closure plus `Ctrl+S` / `Ctrl+Shift+P` / `Ctrl+Shift+T` isolation while inactive;
+- valid regex literals and tag-like JavaScript strings;
+- invalid JavaScript, TypeScript, CSS, and HTML grammar.
+
+### Final verification
+
+Command: `pnpm run verify`
+
+Result: PASS (exit 0), 39.3 seconds.
+
+- TypeScript: PASS, `tsc --noEmit`.
+- ESLint: PASS, no warnings/errors.
+- Tests: PASS, 8 files and 78 tests.
+- Production build: PASS; Next.js 16.3.0 compiled, typechecked, collected page data, and generated all pages.
+- Audit: PASS, `No known vulnerabilities found` at the high-severity threshold.
+
+### Self-review
+
+- `git diff f97e930^..HEAD --check`: PASS.
+- Worktree status before this report append: clean.
+- Scoped secret-pattern scan over all Fix Round 2 production files: no matches.
+- Scoped `TODO` / `FIXME` / `console.log` scan over all Fix Round 2 production files: no matches.
+- The optimistic check still executes within the normalized SQLite file-service transaction and owner scoping is unchanged.
+- No Task 5 files or behavior were introduced.
+
+Fix Round 2 commits:
+
+- `f97e930` — RED runtime-entry, roving-focus, inactive-shortcut, and parser-diagnostic regressions.
+- `f77317b` — GREEN implementation resolving all four Important findings.
