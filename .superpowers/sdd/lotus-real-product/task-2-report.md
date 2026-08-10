@@ -69,3 +69,55 @@ The lifecycle service tests specifically prove creation/list persistence, cross-
 
 - `4c24919 test: add project lifecycle reproducer` — RED checkpoint.
 - `8923570 feat: add Lotus project dashboard and lifecycle` — GREEN implementation and verification.
+
+## Fix Round 1
+
+### Findings addressed
+
+- Settings payloads are now parsed as runtime objects, reject unknown keys, and are reconstructed from only the four allowed preference fields before the database update. A malicious `{ theme: 'dark', userId: 'user-b' }` payload is rejected and both users' rows remain unchanged.
+- Trashed project names render as plain text, not a broken builder link.
+- Duplication truncates the source name to 95 characters before appending ` copy`, so 96–100 character project names remain valid.
+- `system` theme now resolves against `prefers-color-scheme` and listens for changes in both dashboard and builder. The pure resolver has deterministic unit coverage.
+- Every async dashboard transition callback now returns/awaits the action promise through `startTransition`, keeping pending state active for the complete request.
+- Dashboard data uses a 100-record, summary-only projection (`id`, `name`, `status`, `updatedAt`); project files are not selected or serialized to its client component.
+
+### Added test coverage
+
+- `lib/projects.test.ts`: duplicate 100-character name boundary; summary projection excluding `files`; malicious settings key rejection with user isolation.
+- `lib/theme.test.ts`: explicit dark/light preferences and both system preference outcomes.
+
+### Commands and outputs
+
+```
+pnpm test -- lib/projects.test.ts lib/theme.test.ts
+Test Files  2 passed (2)
+Tests  14 passed (14)
+
+pnpm run typecheck
+tsc --noEmit (passed)
+
+pnpm run lint
+eslint . (passed)
+
+pnpm run verify
+typecheck: passed
+lint: passed
+vitest: Test Files 4 passed (4), Tests 24 passed (24)
+next build: passed; routes include / and /projects/[projectId]
+pnpm audit --audit-level high: No known vulnerabilities found
+
+pnpm run test:coverage
+Tests 24 passed (24)
+Statements 88.88%, Branches 84.15%, Functions 84.44%, Lines 95.77%
+```
+
+### Fix Round 1 self-review
+
+- The service accepts `unknown` at the settings boundary. It rejects non-object/array payloads and every unknown key before creating a fresh, whitelisted update object, so a runtime payload cannot alter `userId`, timestamps, or other database columns.
+- The summary selector is separate from the full-project selector needed by builder/server operations, preventing `files` from entering dashboard props.
+- The system-theme listener is registered only on the client and removed on unmount.
+- No Task 3 schema or normalized-file work was started.
+
+### Fix Round 1 concerns
+
+- Browser E2E coverage remains a Task 8 deliverable; the new behavior is covered at the service and deterministic theme-resolution levels.

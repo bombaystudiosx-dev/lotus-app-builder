@@ -17,6 +17,7 @@ import {
 } from '@/app/actions/projects'
 import { authClient } from '@/lib/auth-client'
 import { useRouter } from 'next/navigation'
+import { useResolvedTheme } from '@/components/lotus/use-resolved-theme'
 
 type DashboardProject = Pick<Project, 'id' | 'name' | 'status' | 'updatedAt'>
 type DashboardSettings = Pick<UserSettings, 'theme' | 'editorFontSize' | 'autosaveInterval' | 'defaultDevice'>
@@ -40,15 +41,20 @@ export function ProjectDashboard({ initialProjects, initialSettings, userName }:
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
   const [pending, startTransition] = useTransition()
+  const resolvedTheme = useResolvedTheme(settings.theme)
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', settings.theme === 'dark')
-  }, [settings.theme])
+    document.documentElement.classList.toggle('dark', resolvedTheme === 'dark')
+  }, [resolvedTheme])
 
   function run(action: () => Promise<void>) {
     setError(null)
-    startTransition(() => {
-      action().catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Something went wrong.'))
+    startTransition(async () => {
+      try {
+        await action()
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'Something went wrong.')
+      }
     })
   }
 
@@ -157,14 +163,21 @@ function ProjectSection({ title, projects, empty, pending, onError, onChanged }:
   const disabled = pending || isPending
   function run(action: () => Promise<void>) {
     onError(null)
-    startTransition(() => action().then(onChanged).catch((reason: unknown) => onError(reason instanceof Error ? reason.message : 'Something went wrong.')))
+    startTransition(async () => {
+      try {
+        await action()
+        onChanged()
+      } catch (reason) {
+        onError(reason instanceof Error ? reason.message : 'Something went wrong.')
+      }
+    })
   }
   return <section className="mt-9" aria-labelledby={`${title.toLowerCase().replaceAll(' ', '-')}-heading`}>
     <h2 id={`${title.toLowerCase().replaceAll(' ', '-')}-heading`} className="font-serif text-2xl">{title}</h2>
     {projects.length === 0 ? <p className="mt-3 text-sm text-muted-foreground">{empty}</p> : <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {projects.map((item) => <li key={item.id} className="rounded-xl border border-border bg-card p-4">
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0"><Link href={`/projects/${item.id}`} className="block truncate text-lg font-semibold hover:underline">{item.name}</Link><p className="mt-1 text-sm text-muted-foreground">{statusLabel(item.status)} · Updated {dateLabel(item.updatedAt)}</p></div>
+          <div className="min-w-0">{item.status === 'trashed' ? <p className="truncate text-lg font-semibold">{item.name}</p> : <Link href={`/projects/${item.id}`} className="block truncate text-lg font-semibold hover:underline">{item.name}</Link>}<p className="mt-1 text-sm text-muted-foreground">{statusLabel(item.status)} · Updated {dateLabel(item.updatedAt)}</p></div>
           <MoreHorizontal aria-hidden="true" size={18} className="shrink-0 text-muted-foreground" />
         </div>
         <div className="mt-4 flex flex-wrap gap-2">

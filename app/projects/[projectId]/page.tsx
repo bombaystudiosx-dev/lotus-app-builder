@@ -12,7 +12,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
   const [workspace, settings] = await Promise.all([getWorkspace(projectId), getUserSettings()])
   if (!workspace) notFound()
 
-  return <main className={`h-svh w-full overflow-hidden ${settings.theme === 'dark' ? 'dark' : ''}`}>
+  return <main className="h-svh w-full overflow-hidden">
     <LotusBuilder initial={{
       projectId: workspace.projectId,
       name: workspace.name,
@@ -21,6 +21,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
       userName: session.user.name || session.user.email || 'You',
       editorFontSize: settings.editorFontSize,
       defaultDevice: settings.defaultDevice,
+      theme: settings.theme,
     }} />
   </main>
 }

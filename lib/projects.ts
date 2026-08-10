@@ -34,6 +34,34 @@ function cloneFiles(files: Project['files']): Record<string, string> {
   return JSON.parse(JSON.stringify(files ?? {})) as Record<string, string>
 }
 
+function settingsValues(input: unknown): SettingsInput {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ProjectLifecycleError('Settings payload is invalid.')
+  const values = input as Record<string, unknown>
+  const allowed = new Set(['theme', 'editorFontSize', 'autosaveInterval', 'defaultDevice'])
+  if (Object.keys(values).some((key) => !allowed.has(key))) throw new ProjectLifecycleError('Unrecognized setting.')
+
+  const safe: SettingsInput = {}
+  if (values.theme !== undefined) {
+    if (typeof values.theme !== 'string') throw new ProjectLifecycleError('Theme is invalid.')
+    safe.theme = values.theme as Theme
+  }
+  if (values.defaultDevice !== undefined) {
+    if (typeof values.defaultDevice !== 'string') throw new ProjectLifecycleError('Default device is invalid.')
+    safe.defaultDevice = values.defaultDevice as DefaultDevice
+  }
+  if (values.editorFontSize !== undefined) {
+    if (typeof values.editorFontSize !== 'number') throw new ProjectLifecycleError('Editor font size must be between 12 and 24.')
+    safe.editorFontSize = values.editorFontSize
+  }
+  if (values.autosaveInterval !== undefined) {
+    if (typeof values.autosaveInterval !== 'number') throw new ProjectLifecycleError('Autosave interval must be between 5 and 300 seconds.')
+    safe.autosaveInterval = values.autosaveInterval
+  }
+
+  validateSettings(safe)
+  return safe
+}
+
 function validateSettings(input: SettingsInput) {
   if (input.theme && !['system', 'light', 'dark'].includes(input.theme)) throw new ProjectLifecycleError('Theme is invalid.')
   if (input.defaultDevice && !['phone', 'tablet', 'desktop'].includes(input.defaultDevice)) throw new ProjectLifecycleError('Default device is invalid.')
@@ -59,9 +87,23 @@ export function createProjectService(database: ProjectDatabase) {
     return { ...existing, ...values, updatedAt: new Date() } as Project
   }
 
+  async function getSettings(userId: string) {
+    const [existing] = await database.select().from(userSettings).where(eq(userSettings.userId, userId)).limit(1)
+    if (existing) return existing
+    const now = new Date()
+    await database.insert(userSettings).values({ userId, ...DEFAULT_SETTINGS, createdAt: now, updatedAt: now }).onConflictDoNothing()
+    const [created] = await database.select().from(userSettings).where(eq(userSettings.userId, userId)).limit(1)
+    if (!created) throw new ProjectLifecycleError('Unable to initialize settings.')
+    return created
+  }
+
   return {
     async list(userId: string) {
       return database.select().from(project).where(eq(project.userId, userId)).orderBy(desc(project.updatedAt))
+    },
+    async listDashboard(userId: string) {
+      return database.select({ id: project.id, name: project.name, status: project.status, updatedAt: project.updatedAt })
+        .from(project).where(eq(project.userId, userId)).orderBy(desc(project.updatedAt)).limit(100)
     },
     async get(userId: string, projectId: string) {
       const [row] = await database.select().from(project)
@@ -86,7 +128,7 @@ export function createProjectService(database: ProjectDatabase) {
       if (source.status === 'trashed') throw new ProjectLifecycleError('A trashed project cannot be duplicated.')
       const now = new Date()
       const created: typeof project.$inferInsert = {
-        id: newId(), userId, name: normalizedName(`${source.name} copy`), mode: source.mode, files: cloneFiles(source.files),
+        id: newId(), userId, name: normalizedName(`${source.name.slice(0, 95).trimEnd()} copy`), mode: source.mode, files: cloneFiles(source.files),
         status: 'active', createdAt: now, updatedAt: now,
       }
       await database.insert(project).values(created)
@@ -112,19 +154,11 @@ export function createProjectService(database: ProjectDatabase) {
       if (existing.status !== 'trashed') throw new ProjectLifecycleError('Only trashed projects can be permanently deleted.')
       await database.delete(project).where(and(eq(project.id, projectId), eq(project.userId, userId), eq(project.status, 'trashed')))
     },
-    async getSettings(userId: string) {
-      const [existing] = await database.select().from(userSettings).where(eq(userSettings.userId, userId)).limit(1)
-      if (existing) return existing
-      const now = new Date()
-      await database.insert(userSettings).values({ userId, ...DEFAULT_SETTINGS, createdAt: now, updatedAt: now }).onConflictDoNothing()
-      const [created] = await database.select().from(userSettings).where(eq(userSettings.userId, userId)).limit(1)
-      if (!created) throw new ProjectLifecycleError('Unable to initialize settings.')
-      return created
-    },
-    async updateSettings(userId: string, input: SettingsInput) {
-      validateSettings(input)
-      const current = await this.getSettings(userId)
-      const values = { ...input, updatedAt: new Date() }
+    getSettings,
+    async updateSettings(userId: string, input: unknown) {
+      const inputValues = settingsValues(input)
+      const current = await getSettings(userId)
+      const values = { ...inputValues, updatedAt: new Date() }
       await database.update(userSettings).set(values).where(eq(userSettings.userId, userId))
       return { ...current, ...values } as UserSettings
     },

@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { redactSensitiveValues } from "@/lib/safety";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import { useResolvedTheme } from "@/components/lotus/use-resolved-theme";
 
 const logoLotus = "/logo_lotus.png";
 
@@ -526,11 +527,13 @@ interface LotusBuilderProps {
     userName: string;
     editorFontSize: number;
     defaultDevice: DeviceMode;
+    theme: "system" | "light" | "dark";
   };
 }
 
 export default function App({ initial }: LotusBuilderProps) {
   const router = useRouter();
+  const resolvedTheme = useResolvedTheme(initial.theme);
   const initialMessages: ChatMessage[] = initial.messages.length
     ? initial.messages.map((m) => ({ id: m.id, role: m.role, content: m.content, ts: new Date(m.ts) }))
     : INIT_MESSAGES;
@@ -673,7 +676,7 @@ export default function App({ initial }: LotusBuilderProps) {
   ];
 
   return (
-    <div className="size-full flex flex-col overflow-hidden" style={{ fontFamily:"Outfit,sans-serif", background:"var(--background)" }}>
+    <div className={`size-full flex flex-col overflow-hidden ${resolvedTheme === "dark" ? "dark" : ""}`} style={{ fontFamily:"Outfit,sans-serif", background:"var(--background)" }}>
 
       {/* ── Top bar ── */}
       <header className="flex-shrink-0 flex items-center justify-between px-5" style={{ height:60, borderBottom:"1px solid var(--border)", background:"var(--card)" }}>

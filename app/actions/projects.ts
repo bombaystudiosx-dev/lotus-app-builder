@@ -29,7 +29,7 @@ function refreshProjectViews(projectId?: string) {
 
 export async function getProjectDashboard() {
   const userId = await getUserId()
-  const [items, settings] = await Promise.all([projects.list(userId), projects.getSettings(userId)])
+  const [items, settings] = await Promise.all([projects.listDashboard(userId), projects.getSettings(userId)])
   return { projects: items, settings }
 }
 
@@ -78,12 +78,7 @@ export async function permanentlyDeleteProjectAction(projectId: string) {
   refreshProjectViews(projectId)
 }
 
-export async function updateSettingsAction(input: {
-  theme?: 'system' | 'light' | 'dark'
-  editorFontSize?: number
-  autosaveInterval?: number
-  defaultDevice?: 'phone' | 'tablet' | 'desktop'
-}) {
+export async function updateSettingsAction(input: unknown) {
   const updated = await projects.updateSettings(await getUserId(), input)
   refreshProjectViews()
   return updated

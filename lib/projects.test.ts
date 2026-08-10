@@ -54,6 +54,27 @@ describe('project lifecycle service', () => {
     expect(duplicate.id).not.toBe(created.id)
   })
 
+  it('truncates a duplicate name safely at the 100 character boundary', async () => {
+    const projects = setup()
+    const sourceName = 'a'.repeat(100)
+    const created = await projects.createBlank('user-a', sourceName)
+
+    const duplicate = await projects.duplicate('user-a', created.id)
+
+    expect(duplicate.name).toBe(`${'a'.repeat(95)} copy`)
+    expect(duplicate.name).toHaveLength(100)
+  })
+
+  it('returns dashboard summaries without project file contents and applies a safety limit', async () => {
+    const projects = setup()
+    const created = await projects.createBlank('user-a', 'Summary only')
+
+    const summaries = await projects.listDashboard('user-a')
+
+    expect(summaries).toEqual([expect.objectContaining({ id: created.id, name: 'Summary only', status: 'active' })])
+    expect(summaries[0]).not.toHaveProperty('files')
+  })
+
   it('transitions a project through archive, restore, trash, restore, and permanent delete', async () => {
     const projects = setup()
     const created = await projects.createBlank('user-a', 'Lifecycle')
@@ -104,5 +125,14 @@ describe('project lifecycle service', () => {
     expect(updated).toMatchObject({ userId: 'user-a', theme: 'dark', editorFontSize: 18, autosaveInterval: 15, defaultDevice: 'desktop' })
     await expect(projects.getSettings('user-b')).resolves.toMatchObject({ theme: 'system', editorFontSize: 14, autosaveInterval: 30, defaultDevice: 'phone' })
     await expect(projects.updateSettings('user-a', { editorFontSize: 100 })).rejects.toThrow('Editor font size')
+  })
+
+  it('rejects unrecognized settings payload keys without changing either user', async () => {
+    const projects = setup()
+
+    await expect(projects.updateSettings('user-a', { theme: 'dark', userId: 'user-b' } as unknown)).rejects.toThrow('Unrecognized setting')
+
+    await expect(projects.getSettings('user-a')).resolves.toMatchObject({ userId: 'user-a', theme: 'system' })
+    await expect(projects.getSettings('user-b')).resolves.toMatchObject({ userId: 'user-b', theme: 'system' })
   })
 })
