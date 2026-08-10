@@ -237,7 +237,7 @@ describe('safe static preview assembly', () => {
 
   it('structurally authenticates exact assembler-created page links rather than any data URL prefix', () => {
     const output = assembleStaticPreview(files({
-      'index.html': `<a id="safe" href="about.html">Safe</a><a id="forged" href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">Forged</a><script>document.getElementById('safe').setAttribute('href','data:text/html;base64,PHNjcmlwdD5hbGVydCgyKTwvc2NyaXB0Pg==')</script>`,
+      'index.html': `<a id="safe" href="about.html">Safe</a><a id="forged" href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">Forged</a><script>window.addEventListener('click',()=>document.body.dataset.clickBypass='true',true);document.getElementById('safe').setAttribute('href','data:text/html;base64,PHNjcmlwdD5hbGVydCgyKTwvc2NyaXB0Pg==')</script>`,
       'about.html': '<p>About</p>',
     }), 'index.html')
     const inertDom = new JSDOM(output.html)
@@ -253,6 +253,7 @@ describe('safe static preview assembly', () => {
     const mutated = dom.window.document.querySelector('#safe') as HTMLAnchorElement
     expect(mutated.getAttribute('href')).toContain('PHNjcmlwdD5hbGVydCgyK')
     expect(mutated.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, cancelable: true }))).toBe(false)
+    expect(dom.window.document.body.dataset.clickBypass).toBeUndefined()
     dom.window.close()
   })
 
