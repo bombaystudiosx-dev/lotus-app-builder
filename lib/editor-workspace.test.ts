@@ -7,6 +7,8 @@ import {
   editDocument,
   languageForPath,
   reopenLastClosed,
+  reconcileExternalFiles,
+  resolveProjectReference,
   saveDocument,
   type EditorFile,
 } from '@/lib/editor-workspace'
@@ -60,6 +62,24 @@ describe('editor workspace state', () => {
     expect(session.activeFileId).toBe('css')
     expect(session.layout).toEqual({ treeWidth: 160, previewWidth: 720, problemsHeight: 96 })
   })
+
+  it('preserves an explicitly persisted zero-tab workspace', () => {
+    const session = createEditorSession(files, 'lotus', { openFileIds: [], activeFileId: null })
+
+    expect(session.openFileIds).toEqual([])
+    expect(session.activeFileId).toBeNull()
+  })
+
+  it('reconciles clean external updates and flags conflicts without overwriting dirty buffers', () => {
+    const initial = files.map((file) => ({ ...file, version: 1 }))
+    const clean = createEditorSession(initial, 'lotus')
+    const cleanUpdate = reconcileExternalFiles(clean, [{ ...initial[0], content: '<main>Server</main>', version: 2 }, ...initial.slice(1)])
+    const dirty = editDocument(clean, 'html', '<main>Mine</main>')
+    const conflict = reconcileExternalFiles(dirty, [{ ...initial[0], content: '<main>Server</main>', version: 2 }, ...initial.slice(1)])
+
+    expect(cleanUpdate.documents.html).toMatchObject({ content: '<main>Server</main>', dirty: false, version: 2 })
+    expect(conflict.documents.html).toMatchObject({ content: '<main>Mine</main>', dirty: true, conflict: true, externalContent: '<main>Server</main>' })
+  })
 })
 
 describe('editor language and diagnostics', () => {
@@ -82,6 +102,17 @@ describe('editor language and diagnostics', () => {
     ]))
     expect(diagnoseDocument('index.html', '<main><section></section></main>')).toEqual([])
   })
+
+  it.each([
+    ['styles.css', 'main { color: red;'],
+    ['main.js', 'function broken() {'],
+    ['thing.ts', 'const value: string = {'],
+    ['README.md', '```ts\nconst value = 1'],
+  ])('reports useful %s syntax diagnostics', (path, content) => {
+    expect(diagnoseDocument(path, content)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path, severity: 'error', line: expect.any(Number) }),
+    ]))
+  })
 })
 
 describe('local preview composition', () => {
@@ -94,5 +125,20 @@ describe('local preview composition', () => {
     expect(document).toContain('<style data-lotus-path="styles.css">main { color: red; }</style>')
     expect(document).toContain('<script data-lotus-path="script.js">console.info("ready")</script>')
     expect(document).not.toContain('src="script.js"')
+  })
+
+  it('resolves safe nested relative references and leaves traversal references unexpanded', () => {
+    const nested: EditorFile[] = [
+      { id: 'entry', path: 'pages/index.html', content: '<link href="../styles/main.css"><script src="./scripts/app.js"></script><script src="../../secret.js"></script>', encoding: 'utf-8' },
+      { id: 'style', path: 'styles/main.css', content: 'body {}', encoding: 'utf-8' },
+      { id: 'script', path: 'pages/scripts/app.js', content: 'console.info("safe")', encoding: 'utf-8' },
+      { id: 'secret', path: 'secret.js', content: 'console.info("secret")', encoding: 'utf-8' },
+    ]
+
+    expect(resolveProjectReference('pages/index.html', '../styles/main.css')).toBe('styles/main.css')
+    expect(resolveProjectReference('pages/index.html', '../../secret.js')).toBeNull()
+    expect(buildPreviewDocument(nested, 'pages/index.html')).toContain('data-lotus-path="styles/main.css"')
+    expect(buildPreviewDocument(nested, 'pages/index.html')).toContain('data-lotus-path="pages/scripts/app.js"')
+    expect(buildPreviewDocument(nested, 'pages/index.html')).toContain('src="../../secret.js"')
   })
 })

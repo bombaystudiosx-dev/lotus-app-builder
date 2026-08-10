@@ -62,6 +62,27 @@ describe('normalized project files', () => {
     await expect(projects.getFile('user-a', created.id, copy.id, { includeTrashed: true })).resolves.toBeNull()
   })
 
+  it('renames the configured entry file and runtime path in one transaction', async () => {
+    const projects = setup()
+    const created = await projects.createBlank('user-a')
+    const entry = await projects.getFileByPath('user-a', created.id, 'index.html')
+
+    await projects.renameFile('user-a', created.id, entry!.id, 'src/index.html')
+
+    await expect(projects.getRuntime('user-a', created.id)).resolves.toMatchObject({ entryPath: 'src/index.html' })
+    await expect(projects.getFileByPath('user-a', created.id, 'src/index.html')).resolves.toMatchObject({ id: entry!.id })
+  })
+
+  it('rejects an optimistic save after another writer changed the file', async () => {
+    const projects = setup()
+    const created = await projects.createBlank('user-a')
+    const entry = await projects.getFileByPath('user-a', created.id, 'index.html')
+    await projects.updateFile('user-a', created.id, entry!.id, { content: 'external' })
+
+    await expect(projects.updateFile('user-a', created.id, entry!.id, { content: 'stale', expectedUpdatedAt: entry!.updatedAt })).rejects.toThrow('changed elsewhere')
+    await expect(projects.getFile('user-a', created.id, entry!.id)).resolves.toMatchObject({ content: 'external' })
+  })
+
   it('rejects traversal, Windows reserved paths, duplicates, invalid encodings, oversized input, and cross-user mutations', async () => {
     const projects = setup()
     const created = await projects.createBlank('user-a')
