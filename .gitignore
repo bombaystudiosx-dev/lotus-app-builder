@@ -15,6 +15,7 @@ node_modules
 data/
 *.log
 *.tsbuildinfo
+coverage/
 AGENTS.md
 CLAUDE.md
 .worktrees/

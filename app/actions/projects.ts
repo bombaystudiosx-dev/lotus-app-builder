@@ -26,7 +26,6 @@ const MODEL_MAP: Record<string, string> = {
   'Claude Opus': 'anthropic/claude-opus-4.5',
   'Gemini Pro': 'google/gemini-2.5-pro',
   'DeepSeek Coder': 'anthropic/claude-sonnet-4.5',
-  'Local Model': 'anthropic/claude-sonnet-4.5',
 }
 
 function resolveModel(label: string) {
@@ -82,12 +81,12 @@ export async function getWorkspace(): Promise<Workspace> {
   const files = (proj.files as Record<string, string>) || {}
   return {
     projectId: proj.id,
-    name: proj.name,
-    html: files['index.html'] ?? null,
+    name: redactSensitiveValues(proj.name),
+    html: files['index.html'] ? redactSensitiveValues(files['index.html']) : null,
     messages: rows.map((r) => ({
       id: r.id,
       role: r.role as 'user' | 'assistant',
-      content: r.content,
+      content: redactSensitiveValues(r.content),
       ts: r.createdAt.toISOString(),
     })),
   }
@@ -139,7 +138,9 @@ function deriveName(prompt: string): string {
 export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
   const userId = await getUserId()
   const { prompt, model, currentHtml, context } = input
-  const contextBlock = buildContextBlock(context)
+  const safePrompt = redactSensitiveValues(prompt)
+  const safeCurrentHtml = currentHtml ? redactSensitiveValues(currentHtml) : null
+  const safeContextBlock = redactSensitiveValues(buildContextBlock(context))
 
   // Ensure a project exists (scoped to this user).
   let projectId = input.projectId
@@ -151,7 +152,7 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
       .limit(1)
     if (!owned) projectId = null
   }
-  let projectName = deriveName(prompt)
+  let projectName = deriveName(safePrompt)
   if (!projectId) {
     projectId = id()
     await db.insert(project).values({ id: projectId, userId, name: projectName, mode: 'html', files: {} })
@@ -170,13 +171,10 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
     projectId,
     userId,
     role: 'user',
-    content: prompt,
+    content: safePrompt,
   })
 
   // Build the prompt for the model, giving it the current app as context.
-  const safePrompt = redactSensitiveValues(prompt)
-  const safeCurrentHtml = currentHtml ? redactSensitiveValues(currentHtml) : null
-  const safeContextBlock = redactSensitiveValues(contextBlock)
   const userContent = safeCurrentHtml
     ? `Here is the current app HTML:\n\n${safeCurrentHtml}\n\n---\n\nApply this change and return the full updated HTML document:\n${safePrompt}${safeContextBlock}`
     : `Build this app and return a complete HTML document:\n${safePrompt}${safeContextBlock}`

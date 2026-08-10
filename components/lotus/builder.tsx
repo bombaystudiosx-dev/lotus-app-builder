@@ -14,6 +14,9 @@ import { LivePreview } from "@/components/lotus/live-preview";
 import { runBuild, type WorkspaceMessage } from "@/app/actions/projects";
 import { authClient } from "@/lib/auth-client";
 import { toast } from "sonner";
+import { redactSensitiveValues } from "@/lib/safety";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
 
 const logoLotus = "/logo_lotus.png";
 
@@ -29,7 +32,7 @@ interface Connector    { id: string; name: string; desc: string; connected: bool
 interface Capability   { id: string; name: string; desc: string; category: string; active: boolean; }
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
-const MODELS = ["Enigma Auto", "GPT-4.1", "Claude Sonnet", "Claude Opus", "Gemini Pro", "DeepSeek Coder", "Local Model"];
+const MODELS = ["Enigma Auto", "GPT-4.1", "Claude Sonnet", "Claude Opus", "Gemini Pro", "DeepSeek Coder"];
 
 const INIT_CONNECTORS: Connector[] = [
   { id:"sup", name:"Supabase",        desc:"Postgres database & auth",       connected:false },
@@ -525,6 +528,7 @@ interface LotusBuilderProps {
 }
 
 export default function App({ initial }: LotusBuilderProps) {
+  const router = useRouter();
   const initialMessages: ChatMessage[] = initial.messages.length
     ? initial.messages.map((m) => ({ id: m.id, role: m.role, content: m.content, ts: new Date(m.ts) }))
     : INIT_MESSAGES;
@@ -602,7 +606,8 @@ export default function App({ initial }: LotusBuilderProps) {
   async function handleSend(text = input.trim()) {
     if (!text || isTyping) return;
     const uid = Date.now().toString();
-    setMessages(p=>[...p,{ id: uid, role:"user", content:text, ts:new Date() }]);
+    const safeText = redactSensitiveValues(text);
+    setMessages(p=>[...p,{ id: uid, role:"user", content:safeText, ts:new Date() }]);
     setInput("");
     setIsTyping(true);
     setAutosaved(false);
@@ -625,7 +630,7 @@ export default function App({ initial }: LotusBuilderProps) {
       setGeneratedHtml(res.html);
       setView("preview");
       setMessages(p=>[...p,{ id:(Date.now()+1).toString(), role:"assistant", content:res.reply, ts:new Date() }]);
-      setHistory(h=>[...h.slice(0,historyIdx+1), { label:text, html:res.html }]);
+      setHistory(h=>[...h.slice(0,historyIdx+1), { label:safeText, html:res.html }]);
       setHistoryIdx(i=>i+1);
     } catch (e) {
       setMessages(p=>[...p,{ id:(Date.now()+1).toString(), role:"assistant", content: e instanceof Error ? e.message : "Something went wrong while building.", ts:new Date() }]);
@@ -653,7 +658,6 @@ export default function App({ initial }: LotusBuilderProps) {
     { label:"Generate Plan",       text:"Generate a full product plan for this app." },
     { label:"Fix Bugs",            text:"Review the current code and fix any bugs." },
     { label:"Improve UI",          text:"Improve the visual design and polish the UI." },
-    { label:"Prepare Store Build", text:"Prepare everything needed for an App Store submission." },
   ];
 
   const toolbarBtns: { icon:React.ReactNode; label:string; onClick:()=>void; active?:boolean }[] = [
@@ -674,7 +678,7 @@ export default function App({ initial }: LotusBuilderProps) {
 
         {/* Logo */}
         <div className="flex items-center gap-2.5 min-w-0">
-          <img src={logoLotus} alt="Lotus" style={{ width:50, height:50, objectFit:"contain" }}/>
+          <Image src={logoLotus} alt="Lotus" width={50} height={50} style={{ objectFit:"contain" }}/>
           <span style={{ fontFamily:"Fraunces,serif", fontWeight:500, fontSize:21, color:"var(--foreground)", letterSpacing:"-0.02em" }}>Lotus</span>
           {projectId && (
             <>
@@ -755,7 +759,7 @@ export default function App({ initial }: LotusBuilderProps) {
                   <button
                     type="button"
                     role="menuitem"
-                    onClick={async ()=>{ await authClient.signOut(); window.location.assign("/sign-in"); }}
+                    onClick={async ()=>{ await authClient.signOut(); router.push("/sign-in"); }}
                     className="mt-1 w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-left transition-colors hover:bg-[var(--muted)]"
                     style={{ color:"var(--destructive)" }}>
                     <LogOut size={13}/> Sign out
@@ -837,7 +841,7 @@ export default function App({ initial }: LotusBuilderProps) {
           {/* Composer */}
           <div className="flex-shrink-0 px-3 pb-3">
             {/* Toolbar */}
-            <div className="flex items-center gap-0.5 mb-1.5 relative">
+            <div className="hidden items-center gap-0.5 mb-1.5 relative">
               {/* Plus with popover */}
               <div className="relative">
                 <button onClick={()=>{ setShowPlus(p=>!p); setShowModel(false); }}
