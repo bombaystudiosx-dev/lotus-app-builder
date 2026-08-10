@@ -24,6 +24,40 @@ function createLegacyDatabase() {
   return database
 }
 
+function createStaleChildDatabase() {
+  const database = createDatabase()
+  database.pragma('foreign_keys = OFF')
+  database.exec(`
+    CREATE TABLE user (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, emailVerified INTEGER NOT NULL DEFAULT 0, image TEXT, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL);
+    CREATE TABLE project (id TEXT PRIMARY KEY, userId TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE, name TEXT NOT NULL DEFAULT 'Untitled', mode TEXT NOT NULL DEFAULT 'html', files TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'active', archivedAt INTEGER, deletedAt INTEGER, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL);
+    CREATE TABLE message (id TEXT PRIMARY KEY, projectId TEXT NOT NULL REFERENCES project_legacy(id) ON DELETE CASCADE, userId TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE, role TEXT NOT NULL, content TEXT NOT NULL, createdAt INTEGER NOT NULL);
+    CREATE INDEX message_project_created_at_idx ON message(projectId, createdAt);
+    CREATE INDEX message_user_created_at_idx ON message(userId, createdAt);
+    CREATE TABLE project_file (id TEXT PRIMARY KEY, projectId TEXT NOT NULL REFERENCES project_legacy(id) ON DELETE CASCADE, path TEXT NOT NULL, content TEXT NOT NULL, encoding TEXT NOT NULL DEFAULT 'utf-8', size INTEGER NOT NULL, originalPath TEXT, deletedAt INTEGER, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL);
+    CREATE INDEX project_file_project_updated_at_idx ON project_file(projectId, updatedAt);
+    CREATE UNIQUE INDEX project_file_active_path_idx ON project_file(projectId, path) WHERE deletedAt IS NULL;
+    CREATE TABLE project_runtime (projectId TEXT PRIMARY KEY REFERENCES project_legacy(id) ON DELETE CASCADE, runtime TEXT NOT NULL DEFAULT 'static', framework TEXT NOT NULL DEFAULT 'static', buildTool TEXT, entryPath TEXT NOT NULL DEFAULT 'index.html', metadata TEXT NOT NULL DEFAULT '{}', createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL);
+    INSERT INTO user VALUES ('user-1', 'Lotus', 'lotus@example.com', 0, NULL, 1, 1);
+    INSERT INTO project VALUES ('project-1', 'user-1', 'Existing project', 'html', '{}', 'active', NULL, NULL, 1, 1);
+    INSERT INTO message VALUES ('message-1', 'project-1', 'user-1', 'user', 'Keep this', 1);
+    INSERT INTO project_file VALUES ('file-1', 'project-1', 'index.html', '<h1>Keep this</h1>', 'utf-8', 18, NULL, NULL, 1, 1);
+    INSERT INTO project_runtime VALUES ('project-1', 'static', 'static', NULL, 'index.html', '{}', 1, 1);
+  `)
+  database.pragma('user_version = 4')
+  return database
+}
+
+function expectRequiredChildIndexes(database: Database.Database) {
+  expect(database.prepare("PRAGMA index_list('message')").all()).toEqual(expect.arrayContaining([
+    expect.objectContaining({ name: 'message_project_created_at_idx' }),
+    expect.objectContaining({ name: 'message_user_created_at_idx' }),
+  ]))
+  expect(database.prepare("PRAGMA index_list('project_file')").all()).toEqual(expect.arrayContaining([
+    expect.objectContaining({ name: 'project_file_project_updated_at_idx' }),
+    expect.objectContaining({ name: 'project_file_active_path_idx', unique: 1, partial: 1 }),
+  ]))
+}
+
 describe('migrateDatabase', () => {
   it('initializes a fresh database with relational integrity and query indexes', () => {
     const database = createDatabase()
@@ -117,6 +151,16 @@ describe('migrateDatabase', () => {
     database.prepare("DELETE FROM project WHERE id = 'project-2'").run()
     expect(database.prepare('SELECT count(*) AS count FROM project_file').get()).toEqual({ count: 0 })
     expect(database.prepare('SELECT count(*) AS count FROM project_runtime').get()).toEqual({ count: 0 })
+    expectRequiredChildIndexes(database)
+  })
+
+  it('recreates named indexes after stale foreign-key child table rebuilds', () => {
+    const database = createStaleChildDatabase()
+
+    migrateDatabase(database)
+
+    expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    expectRequiredChildIndexes(database)
   })
 
   it('retires legacy file JSON atomically so restarts cannot resurrect trashed or deleted files', () => {

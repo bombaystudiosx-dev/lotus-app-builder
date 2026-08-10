@@ -110,12 +110,17 @@ function assertNoOrphans(sqlite: Database.Database, table: string, column: strin
   }
 }
 
+function dropIndexes(sqlite: Database.Database, names: string[]) {
+  for (const name of names) sqlite.exec(`DROP INDEX IF EXISTS ${name}`)
+}
+
 function rebuildProjectTable(sqlite: Database.Database) {
   if (!tableExists(sqlite, 'project') || hasForeignKey(sqlite, 'project', 'userId', 'user')) return
   assertNoOrphans(sqlite, 'project', 'userId', 'user')
   const legacyStatus = columnExists(sqlite, 'project', 'status') ? "COALESCE(status, 'active')" : "'active'"
   const legacyArchivedAt = columnExists(sqlite, 'project', 'archivedAt') ? 'archivedAt' : 'NULL'
   const legacyDeletedAt = columnExists(sqlite, 'project', 'deletedAt') ? 'deletedAt' : 'NULL'
+  dropIndexes(sqlite, ['project_user_updated_at_idx', 'project_user_status_updated_at_idx'])
   sqlite.exec(`
     ALTER TABLE project RENAME TO project_legacy;
     CREATE TABLE project (
@@ -140,6 +145,7 @@ function rebuildMessageTable(sqlite: Database.Database) {
   if (hasForeignKey(sqlite, 'message', 'projectId', 'project') && hasForeignKey(sqlite, 'message', 'userId', 'user')) return
   assertNoOrphans(sqlite, 'message', 'projectId', 'project')
   assertNoOrphans(sqlite, 'message', 'userId', 'user')
+  dropIndexes(sqlite, ['message_project_created_at_idx', 'message_user_created_at_idx'])
   sqlite.exec(`
     ALTER TABLE message RENAME TO message_legacy;
     ${CREATE_MESSAGE_TABLE_SQL}
@@ -158,6 +164,7 @@ function rebuildProjectFileTable(sqlite: Database.Database) {
   assertNoOrphans(sqlite, 'project_file', 'projectId', 'project')
   const originalPath = columnExists(sqlite, 'project_file', 'originalPath') ? 'originalPath' : 'NULL'
   const deletedAt = columnExists(sqlite, 'project_file', 'deletedAt') ? 'deletedAt' : 'NULL'
+  dropIndexes(sqlite, ['project_file_project_updated_at_idx', 'project_file_active_path_idx'])
   sqlite.exec(`
     ALTER TABLE project_file RENAME TO project_file_legacy;
     ${CREATE_PROJECT_FILE_TABLE_SQL}
