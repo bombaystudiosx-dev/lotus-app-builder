@@ -23,7 +23,7 @@ describe('safe static preview assembly', () => {
 
     expect(output.html).toContain('<style data-lotus-path="styles/site.css">')
     expect(output.html).toContain('data:image/svg+xml;base64,')
-    expect(output.html).toContain('<script data-lotus-path="scripts/app.js">')
+    expect(output.html).toContain('<script data-lotus-path="scripts/app.js" nonce="')
     expect(output.html).toContain('data:text/html;base64,')
     expect(output.diagnostics).toEqual([])
     expect(output.html).not.toContain('src="images/mark.svg"')
@@ -257,6 +257,9 @@ describe('safe static preview assembly', () => {
       `const {getOwnPropertyDescriptors: describeAll}=Object; const getter=describeAll(globalThis).location.get; getter.call(globalThis).assign('https://evil.example/descriptors-alias')`,
       `const lookup=Object.prototype.__lookupGetter__; const getter=lookup.call(globalThis,'location'); getter.call(globalThis).href='https://evil.example/prototype-getter'`,
       `const proto=Object.getPrototypeOf(document); Reflect.get(proto,'location',document).href='https://evil.example/document-prototype'`,
+      `const read=Reflect.get.bind(Reflect); read(globalThis,'location').href='https://evil.example/bound-reflect'`,
+      `const describe=Object.getOwnPropertyDescriptor.bind(Object); describe(globalThis,'location').get.call(globalThis).href='https://evil.example/bound-descriptor'`,
+      `const proto=document.__proto__; proto.location.href='https://evil.example/legacy-prototype'`,
     ]
 
     for (const code of attempts) {
