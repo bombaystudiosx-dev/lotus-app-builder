@@ -284,6 +284,13 @@ Result: PASS (exit 0), 40.2 seconds.
 - Audit: PASS, `No known vulnerabilities found` at the high-severity threshold.
 - Diff hygiene: PASS, `git diff --check` returned no findings before the implementation commits.
 
+Coverage command: `pnpm run test:coverage`
+
+- All 115 tests passed.
+- `lib/preview-runtime.ts`: 88.57% statements, 78.78% branches, 97.43% functions, 94.7% lines.
+- `lib/runtime-guard.ts`: 82.84% statements, 77.45% branches, 90.9% functions, 97.69% lines.
+- Repository aggregate: 76.78% statements, 69.87% branches, 76.94% functions, 83.4% lines. Both production modules changed in Fix Round 3 exceed 80% statement coverage; the repository has no global coverage threshold.
+
 ### Fix-round commits
 
 - `d2fa3c4` — RED intrinsic-constructor, alias-navigation, structural-link, and expansion-budget regressions.
