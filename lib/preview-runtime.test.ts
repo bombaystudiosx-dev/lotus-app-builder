@@ -275,6 +275,24 @@ describe('safe static preview assembly', () => {
     }
   })
 
+  it('blocks reflection aliases introduced through invoked function parameter patterns', () => {
+    const attempts = [
+      `(function ({get: read}) { read(globalThis, 'location').href = 'https://evil.example/parameter-reflect' })(Reflect)`,
+      `function escape(api) { const {get: read} = api; read(globalThis, 'location').replace('https://evil.example/parameter-namespace') } escape(Reflect)`,
+      `const escape = ({api: {getOwnPropertyDescriptor: describe}}) => describe(globalThis, 'location').set.call(globalThis, 'https://evil.example/parameter-nested'); escape({api: Object})`,
+      `const escape = ({get: read} = Reflect) => read(globalThis, 'location').assign('https://evil.example/parameter-default'); escape()`,
+      `function escape(...[api]) { const {get: read} = api; read(globalThis, 'location').href = 'https://evil.example/parameter-rest' } escape(Reflect)`,
+    ]
+
+    for (const code of attempts) {
+      const output = assembleStaticPreview(files({ 'index.html': `<script>${code}</script>` }), 'index.html')
+      expect(output.html).not.toContain('evil.example')
+      expect(output.diagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({ message: expect.stringContaining('navigation') }),
+      ]))
+    }
+  })
+
   it('structurally authenticates exact assembler-created page links rather than any data URL prefix', () => {
     const output = assembleStaticPreview(files({
       'index.html': `<a id="safe" href="about.html">Safe</a><a id="forged" href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">Forged</a><script>window.addEventListener('click',()=>document.body.dataset.clickBypass='true',true);document.getElementById('safe').setAttribute('href','data:text/html;base64,PHNjcmlwdD5hbGVydCgyKTwvc2NyaXB0Pg==')</script>`,

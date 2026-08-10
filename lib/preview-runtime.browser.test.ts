@@ -46,7 +46,7 @@ describe('safe preview browser containment', () => {
     await browser?.close()
   })
 
-  it('prevents dynamic event attributes and handler properties from executing outside instrumentation', async () => {
+  it('allows instrumented function handlers while blocking string-backed handlers', async () => {
     const output = assembleStaticPreview(files({
       'index.html': `<button id="attribute">Attribute</button><button id="namespaced">Namespaced</button><button id="property">Property</button><video id="specialized"></video><script>
         const attribute = document.getElementById('attribute');
@@ -55,10 +55,11 @@ describe('safe preview browser containment', () => {
         const specialized = document.getElementById('specialized');
         try { attribute.setAttribute('onclick', 'document.body.dataset.attributeExecuted="true"') } catch (_) {}
         try { namespaced.setAttributeNS(null, ['on', 'click'].join(''), 'document.body.dataset.namespacedExecuted="true"') } catch (_) {}
-        try { property.onclick = function () { document.body.dataset.propertyExecuted = 'true' } } catch (_) {}
-        try { specialized.onencrypted = function () { document.body.dataset.specializedExecuted = 'true' } } catch (_) {}
+        property.onclick = function () { document.body.dataset.propertyExecuted = 'true'; document.body.dataset.handlerTailExecuted = 'true' };
+        document.body.dataset.assignmentContinued = 'true';
+        try { specialized.onencrypted = 'document.body.dataset.specializedExecuted="true"' } catch (_) {}
         attribute.click(); namespaced.click(); property.click(); specialized.dispatchEvent(new Event('encrypted'));
-        document.body.dataset.handlerProbeComplete = 'true';
+        document.body.dataset.clickContinued = 'true';
       </script>`,
     }), 'index.html')
     const page = await browser.newPage()
@@ -66,10 +67,12 @@ describe('safe preview browser containment', () => {
       await page.setContent(output.html, { waitUntil: 'load' })
       const dom = new JSDOM(await serializedPage(page))
       const state = {
-        handlerProbeComplete: dom.window.document.body.dataset.handlerProbeComplete,
+        assignmentContinued: dom.window.document.body.dataset.assignmentContinued,
+        clickContinued: dom.window.document.body.dataset.clickContinued,
         attributeExecuted: dom.window.document.body.dataset.attributeExecuted,
         namespacedExecuted: dom.window.document.body.dataset.namespacedExecuted,
         propertyExecuted: dom.window.document.body.dataset.propertyExecuted,
+        handlerTailExecuted: dom.window.document.body.dataset.handlerTailExecuted,
         specializedExecuted: dom.window.document.body.dataset.specializedExecuted,
         attributeHandler: dom.window.document.getElementById('attribute')?.getAttribute('onclick'),
         namespacedHandler: dom.window.document.getElementById('namespaced')?.getAttribute('onclick'),
@@ -77,10 +80,12 @@ describe('safe preview browser containment', () => {
       }
 
       expect(state).toEqual({
-        handlerProbeComplete: 'true',
+        assignmentContinued: 'true',
+        clickContinued: 'true',
         attributeExecuted: undefined,
         namespacedExecuted: undefined,
-        propertyExecuted: undefined,
+        propertyExecuted: 'true',
+        handlerTailExecuted: 'true',
         specializedExecuted: undefined,
         attributeHandler: null,
         namespacedHandler: null,
@@ -88,6 +93,32 @@ describe('safe preview browser containment', () => {
       })
     } finally {
       await page.close()
+    }
+  }, 10_000)
+
+  it('removes parameter-reflection and navigation-handler escapes before Chrome execution', async () => {
+    const attempts = [
+      `(function ({get: read}) { read(globalThis, 'location').href = 'about:blank#reflect-parameter-escaped' })(Reflect)`,
+      `(({getOwnPropertyDescriptor: describe}) => describe(globalThis, 'location').set.call(globalThis, 'about:blank#descriptor-parameter-escaped'))(Object)`,
+      `document.getElementById('handler').onclick = function () { globalThis.location.href = 'about:blank#navigation-handler-escaped' }; document.getElementById('handler').click()`,
+    ]
+
+    for (const code of attempts) {
+      const output = assembleStaticPreview(files({
+        'index.html': `<button id="handler">Run</button><script>${code}</script><script>document.body.dataset.safeTailExecuted='true'</script>`,
+      }), 'index.html')
+      const page = await browser.newPage()
+      try {
+        await page.setContent(output.html, { waitUntil: 'load' })
+        const dom = new JSDOM(await serializedPage(page))
+        expect(page.url()).not.toContain('escaped')
+        expect(dom.window.document.body.dataset.safeTailExecuted).toBe('true')
+        expect(output.diagnostics).toEqual(expect.arrayContaining([
+          expect.objectContaining({ message: expect.stringContaining('navigation') }),
+        ]))
+      } finally {
+        await page.close()
+      }
     }
   }, 10_000)
 
