@@ -7,19 +7,20 @@ import {
   RefreshCw, Code2, Zap, ImageIcon, X, ChevronDown,
   Plus, Upload, FileText, Brain, Bot, Cpu, Undo2, Redo2,
   Globe, Copy, Eye, Check, RotateCcw,
-  Plug, GripVertical,
+  Plug,
   LogOut,
 } from "lucide-react";
-import { LivePreview } from "@/components/lotus/live-preview";
+import { PreviewWorkbench } from "@/components/lotus/preview-workbench";
 import { EditorWorkspace } from "@/components/lotus/editor-workspace";
 import { type EditorFile } from "@/lib/editor-workspace";
-import { runBuild, type WorkspaceMessage } from "@/app/actions/projects";
+import { buildProjectPreviewAction, runBuild, type WorkspaceMessage } from "@/app/actions/projects";
 import { authClient } from "@/lib/auth-client";
 import { toast } from "sonner";
 import { redactSensitiveValues } from "@/lib/safety";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useResolvedTheme } from "@/components/lotus/use-resolved-theme";
+import { assembleStaticPreview, type PreviewDiagnostic } from "@/lib/preview-runtime";
 
 const logoLotus = "/logo_lotus.png";
 
@@ -217,6 +218,8 @@ function DeviceFrame({ device, children }: { device:DeviceMode; children:React.R
   if (device==="tablet") return <TabletFrame>{children}</TabletFrame>;
   return <DesktopFrame>{children}</DesktopFrame>;
 }
+
+void DeviceFrame
 
 function EmptyPreview() {
   return (
@@ -463,6 +466,7 @@ interface LotusBuilderProps {
     theme: "system" | "light" | "dark";
     files: EditorFile[];
     entryPath: string;
+    runtime: "static" | "react";
   };
 }
 
@@ -477,7 +481,9 @@ export default function App({ initial }: LotusBuilderProps) {
   const [messages,  setMessages]  = useState<ChatMessage[]>(initialMessages);
   const [projectId, setProjectId] = useState<string | null>(initial.projectId);
   const [projectName, setProjectName] = useState<string>(initial.name || "Untitled");
-  const [generatedHtml, setGeneratedHtml] = useState<string | null>(initial.html);
+  const initialPreview = initial.runtime === "static" ? assembleStaticPreview(initial.files, initial.entryPath) : { html: "", diagnostics: [] };
+  const [generatedHtml, setGeneratedHtml] = useState<string | null>(initialPreview.html || null);
+  const [previewDiagnostics, setPreviewDiagnostics] = useState<PreviewDiagnostic[]>(initialPreview.diagnostics);
   const [builderFiles, setBuilderFiles] = useState<EditorFile[]>(initial.files);
   const [entryPath, setEntryPath] = useState(initial.entryPath);
   const [input,     setInput]     = useState("");
@@ -520,12 +526,28 @@ export default function App({ initial }: LotusBuilderProps) {
   const messagesEndRef  = useRef<HTMLDivElement>(null);
   const fileInputRef    = useRef<HTMLInputElement>(null);
   const imageInputRef   = useRef<HTMLInputElement>(null);
-  const canvasRef       = useRef<HTMLDivElement>(null);
   const accountMenuRef  = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior:"smooth" });
   }, [messages, isTyping]);
+
+  useEffect(() => {
+    if (initial.runtime === "static") {
+      const result = assembleStaticPreview(builderFiles, entryPath);
+      setGeneratedHtml(result.html);
+      setPreviewDiagnostics(result.diagnostics);
+      return;
+    }
+    if (!projectId) return;
+    const timeout = window.setTimeout(() => {
+      buildProjectPreviewAction(projectId).then((result) => {
+        setGeneratedHtml(result.html);
+        setPreviewDiagnostics(result.diagnostics);
+      }).catch((error: unknown) => setPreviewDiagnostics([{ severity:"error", message:error instanceof Error ? error.message : "Local build failed." }]));
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [builderFiles, entryPath, initial.runtime, projectId]);
 
   // Close the account menu on outside click.
   useEffect(() => {
@@ -569,8 +591,11 @@ export default function App({ initial }: LotusBuilderProps) {
       });
       setProjectId(res.projectId);
       setProjectName(res.name);
-      setGeneratedHtml(res.html);
-      setBuilderFiles(current => current.map(file => file.path === entryPath ? { ...file, content: res.html, version: res.version } : file));
+      const nextFiles = builderFiles.map(file => file.path === entryPath ? { ...file, content: res.html, version: res.version } : file);
+      setBuilderFiles(nextFiles);
+      const preview = assembleStaticPreview(nextFiles, entryPath);
+      setGeneratedHtml(preview.html);
+      setPreviewDiagnostics(preview.diagnostics);
       setView("preview");
       setMessages(p=>[...p,{ id:(Date.now()+1).toString(), role:"assistant", content:res.reply, ts:new Date() }]);
       setHistory(h=>[...h.slice(0,historyIdx+1), { label:safeText, html:res.html }]);
@@ -916,34 +941,8 @@ export default function App({ initial }: LotusBuilderProps) {
 
 
           {/* View content */}
-          {view==="preview" && (
-            <div ref={canvasRef} className="flex-1 overflow-hidden relative" style={{
-              backgroundImage:`radial-gradient(circle, rgba(44,34,20,0.07) 1px, transparent 1px)`,
-              backgroundSize:"22px 22px",
-            }}>
-              <div className="absolute inset-0 pointer-events-none" style={{ background:"radial-gradient(ellipse at center, transparent 55%, rgba(245,237,216,0.65) 100%)" }}/>
-              <AnimatePresence mode="wait">
-                <motion.div key={`${device}-${dragKey}`}
-                  className="absolute inset-0 flex items-center justify-center"
-                  initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
-                  transition={{ duration:0.2 }}>
-                  <motion.div drag dragMomentum={false} dragElastic={0} dragConstraints={canvasRef}
-                    className="cursor-grab active:cursor-grabbing relative"
-                    initial={{ scale:0.95, y:12 }} animate={{ scale:1, y:0 }}
-                    transition={{ duration:0.3, ease:[0.22,1,0.36,1] }}>
-                    {/* Grab affordance */}
-                    <div className="absolute -top-6 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-0.5 rounded-full pointer-events-none" style={{ background:"rgba(44,34,20,0.08)" }}>
-                      <GripVertical size={10} style={{ color:"var(--muted-foreground)" }}/>
-                      <span style={{ fontSize:9, color:"var(--muted-foreground)", fontWeight:500 }}>Drag</span>
-                    </div>
-                    <DeviceFrame device={device}>
-                      {generatedHtml ? <LivePreview html={generatedHtml}/> : <EmptyPreview/>}
-                    </DeviceFrame>
-                  </motion.div>
-                </motion.div>
-              </AnimatePresence>
-            </div>
-          )}
+          {view==="preview" && generatedHtml && <div className="min-h-0 flex-1"><PreviewWorkbench key={`${device}-${dragKey}`} html={generatedHtml} diagnostics={previewDiagnostics} initialDevice={device}/></div>}
+          {view==="preview" && !generatedHtml && <div className="min-h-0 flex-1"><EmptyPreview/></div>}
 
           {projectId
             ? <div className={view === "code" ? "flex min-h-0 flex-1" : "hidden"} aria-hidden={view !== "code"}>

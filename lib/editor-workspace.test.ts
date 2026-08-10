@@ -143,7 +143,7 @@ describe('local preview composition', () => {
     expect(document).not.toContain('src="script.js"')
   })
 
-  it('resolves safe nested relative references and leaves traversal references unexpanded', () => {
+  it('resolves safe nested references and removes traversal references from preview output', () => {
     const nested: EditorFile[] = [
       { id: 'entry', path: 'pages/index.html', content: '<link href="../styles/main.css"><script src="./scripts/app.js"></script><script src="../../secret.js"></script>', encoding: 'utf-8' },
       { id: 'style', path: 'styles/main.css', content: 'body {}', encoding: 'utf-8' },
@@ -155,6 +155,6 @@ describe('local preview composition', () => {
     expect(resolveProjectReference('pages/index.html', '../../secret.js')).toBeNull()
     expect(buildPreviewDocument(nested, 'pages/index.html')).toContain('data-lotus-path="styles/main.css"')
     expect(buildPreviewDocument(nested, 'pages/index.html')).toContain('data-lotus-path="pages/scripts/app.js"')
-    expect(buildPreviewDocument(nested, 'pages/index.html')).toContain('src="../../secret.js"')
+    expect(buildPreviewDocument(nested, 'pages/index.html')).not.toContain('src="../../secret.js"')
   })
 })

@@ -103,7 +103,7 @@ function rewriteCss(css: string, cssPath: string, byPath: Map<string, string>, d
 function assembleHtml(entryPath: string, source: string, byPath: Map<string, string>, diagnostics: PreviewDiagnostic[], linkDepth = 0) {
   let html = source
   html = html.replace(/<link\b([^>]*?)href=["']([^"']+)["']([^>]*)>/gi, (tag, before: string, reference: string, after: string) => {
-    if (!/rel\s*=\s*["']?stylesheet/i.test(`${before}${after}`)) return ''
+    if (!/rel\s*=\s*["']?stylesheet/i.test(`${before}${after}`) && !/\.css(?:[?#]|$)/i.test(reference)) return ''
     const path = resolveReference(entryPath, reference)
     const content = path ? byPath.get(path) : undefined
     if (!path || content === undefined) {

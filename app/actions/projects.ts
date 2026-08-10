@@ -9,6 +9,7 @@ import { revalidatePath } from 'next/cache'
 import { generateText } from 'ai'
 import { redactSensitiveValues } from '@/lib/safety'
 import { createProjectService } from '@/lib/projects'
+import { assembleStaticPreview, type PreviewBuild } from '@/lib/preview-runtime'
 
 async function getUserId() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -161,6 +162,7 @@ export interface Workspace {
   messages: WorkspaceMessage[]
   files: Array<{ id: string; path: string; content: string; encoding: 'utf-8' | 'utf-16le'; version: number }>
   entryPath: string
+  runtime: 'static' | 'react'
 }
 
 export async function getWorkspace(projectId: string): Promise<Workspace | null> {
@@ -186,6 +188,7 @@ export async function getWorkspace(projectId: string): Promise<Workspace | null>
     html: index ? redactSensitiveValues(index.content) : null,
     files: files.map(fileDto),
     entryPath,
+    runtime: runtime?.runtime ?? 'static',
     messages: rows.map((r) => ({
       id: r.id,
       role: r.role as 'user' | 'assistant',
@@ -319,6 +322,20 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
   })
 
   return { projectId, name: projectName, html, reply, version: updatedEntry.updatedAt.getTime() }
+}
+
+export async function buildProjectPreviewAction(projectId: string): Promise<PreviewBuild> {
+  const userId = await getUserId()
+  const project = await projects.get(userId, projectId)
+  if (!project || project.status !== 'active') throw new Error('Project not found.')
+  const [runtime, files] = await Promise.all([projects.getRuntime(userId, projectId), projects.listFiles(userId, projectId)])
+  if (!runtime) throw new Error('Project runtime is unavailable.')
+  const input = files.map((file) => ({ path: file.path, content: file.content }))
+  if (runtime.runtime === 'react') {
+    const { bundleReactProject } = await import('@/lib/local-bundler')
+    return bundleReactProject(input, runtime.entryPath)
+  }
+  return assembleStaticPreview(input, runtime.entryPath)
 }
 
 function stripFences(text: string): string {

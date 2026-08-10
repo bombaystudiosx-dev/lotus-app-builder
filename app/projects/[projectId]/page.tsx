@@ -24,6 +24,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
       theme: settings.theme,
       files: workspace.files,
       entryPath: workspace.entryPath,
+      runtime: workspace.runtime,
     }} />
   </main>
 }

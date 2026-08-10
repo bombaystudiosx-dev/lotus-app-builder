@@ -1,6 +1,7 @@
 import { htmlLanguage } from '@codemirror/lang-html'
 import { cssLanguage } from '@codemirror/lang-css'
 import { javascriptLanguage } from '@codemirror/lang-javascript'
+import { assembleStaticPreview } from '@/lib/preview-runtime'
 
 export type EditorLanguage = 'html' | 'css' | 'javascript' | 'json' | 'markdown' | 'typescript' | 'plain'
 
@@ -294,22 +295,7 @@ export function resolveProjectReference(entryPath: string, reference: string) {
 }
 
 export function buildPreviewDocument(files: EditorFile[], entryPath: string) {
-  const entry = files.find((file) => file.path === entryPath)
-  if (!entry) return '<!doctype html><html><body><p>Preview entry file is missing.</p></body></html>'
-
-  const byPath = new Map(files.map((file) => [file.path, file.content]))
-  let html = entry.content
-  html = html.replace(/<link\b[^>]*?href=["']([^"']+)["'][^>]*>/gi, (tag, reference) => {
-    const path = resolveProjectReference(entryPath, reference)
-    const content = path ? byPath.get(path) : undefined
-    return content === undefined ? tag : `<style data-lotus-path="${path}">${content}</style>`
-  })
-  html = html.replace(/<script\b[^>]*?src=["']([^"']+)["'][^>]*><\/script>/gi, (tag, reference) => {
-    const path = resolveProjectReference(entryPath, reference)
-    const content = path ? byPath.get(path) : undefined
-    return content === undefined ? tag : `<script data-lotus-path="${path}">${content.replace(/<\/script/gi, '<\\/script')}</script>`
-  })
-  return html
+  return assembleStaticPreview(files, entryPath).html
 }
 
 export function persistedEditorState(state: EditorSession): PersistedEditorState {

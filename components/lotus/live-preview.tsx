@@ -1,19 +1,24 @@
 'use client'
 
+import { forwardRef } from 'react'
+import { PREVIEW_SANDBOX } from '@/lib/preview-runtime'
+
 interface LivePreviewProps {
   html: string
+  revision?: number
 }
 
-// Renders generated, self-contained HTML inside a sandboxed iframe that fills
-// the device screen. Used inside the Lotus device frames.
-export function LivePreview({ html }: LivePreviewProps) {
+export const LivePreview = forwardRef<HTMLIFrameElement, LivePreviewProps>(function LivePreview({ html, revision = 0 }, ref) {
   return (
     <iframe
+      key={revision}
+      ref={ref}
       title="App preview"
       srcDoc={html}
-      sandbox="allow-scripts allow-forms allow-popups allow-modals"
+      sandbox={PREVIEW_SANDBOX}
+      referrerPolicy="no-referrer"
       className="w-full h-full border-0 bg-white"
       style={{ display: 'block' }}
     />
   )
-}
+})
