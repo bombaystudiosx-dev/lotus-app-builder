@@ -66,6 +66,21 @@ describe('safe static preview assembly', () => {
     expect(output.html).toContain('lotus-preview-event')
   })
 
+  it('authorizes only controlled scripts with a per-document CSP nonce', () => {
+    const output = assembleStaticPreview(files({
+      'index.html': '<main>Nonce boundary</main><script>document.body.dataset.ready="true"</script>',
+    }), 'index.html')
+    const dom = new JSDOM(output.html)
+    const policy = dom.window.document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content') ?? ''
+    const scripts = [...dom.window.document.scripts]
+    const nonces = scripts.map((script) => script.getAttribute('nonce'))
+
+    expect(policy).not.toContain("script-src 'unsafe-inline'")
+    expect(policy).toMatch(/script-src 'nonce-[A-Za-z0-9_-]{20,}'/)
+    expect(scripts.length).toBeGreaterThanOrEqual(3)
+    expect(nonces.every((nonce) => nonce === nonces[0] && Boolean(nonce))).toBe(true)
+  })
+
   it('removes statically unbounded loops before preview JavaScript reaches the browser thread', () => {
     const output = assembleStaticPreview(files({
       'index.html': '<script src="runaway.js"></script><script>for (;;) {}</script>',
@@ -233,6 +248,24 @@ describe('safe static preview assembly', () => {
     expect(dom.window.document.querySelector('meta[http-equiv="refresh"]')).toBeNull()
     expect(dom.window.document.body.dataset.metaBlocked).toBe('true')
     dom.window.close()
+  })
+
+  it('blocks destructured reflection, descriptor getters, and prototype navigation routes', () => {
+    const attempts = [
+      `const {get: read}=Reflect; const nav=read(globalThis,'location'); nav.href='https://evil.example/reflect-alias'`,
+      `const {getOwnPropertyDescriptor: describe}=Object; const getter=describe(globalThis,'location').get; getter.call(globalThis).replace('https://evil.example/descriptor-alias')`,
+      `const {getOwnPropertyDescriptors: describeAll}=Object; const getter=describeAll(globalThis).location.get; getter.call(globalThis).assign('https://evil.example/descriptors-alias')`,
+      `const lookup=Object.prototype.__lookupGetter__; const getter=lookup.call(globalThis,'location'); getter.call(globalThis).href='https://evil.example/prototype-getter'`,
+      `const proto=Object.getPrototypeOf(document); Reflect.get(proto,'location',document).href='https://evil.example/document-prototype'`,
+    ]
+
+    for (const code of attempts) {
+      const output = assembleStaticPreview(files({ 'index.html': `<script>${code}</script>` }), 'index.html')
+      expect(output.html).not.toContain('evil.example')
+      expect(output.diagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({ message: expect.stringContaining('navigation') }),
+      ]))
+    }
   })
 
   it('structurally authenticates exact assembler-created page links rather than any data URL prefix', () => {

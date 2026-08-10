@@ -61,6 +61,7 @@
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.0",
     "jsdom": "^27.4.0",
+    "playwright-core": "1.55.0",
     "postcss": "^8.5",
     "tailwindcss": "^4.3.3",
     "typescript": "5.7.3",
