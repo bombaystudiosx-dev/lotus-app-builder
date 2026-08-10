@@ -303,3 +303,99 @@ Coverage command: `pnpm run test:coverage`
 - No Task 6 work was performed.
 - All changes stayed inside the assigned `lotus-real-product` worktree.
 - No product external API, deployment, push, credential, or third-party mutation was performed.
+
+---
+
+## Fix Round 4 (2026-08-10)
+
+### Outcome
+
+Closed the remaining reflective-navigation, dynamic event-handler, and mutable-meta refresh gaps. Preview scripts now run only under a per-document CSP nonce, while the browser bridge synchronously seals event and metadata mutation surfaces before any instrumented project script runs.
+
+### Reflection and navigation containment
+
+- Extended the Acorn guard to track `Reflect` and `Object` namespace aliases, destructured reflection functions, bound functions, document/global aliases, `Window`/`Document` prototypes, `Object.getPrototypeOf(...)`, and legacy `__proto__` routes.
+- Conservatively rejects acquisition or invocation of the high-risk reflection accessors used to recover `location` or `navigation`, including `Reflect.get`, `Reflect.apply`, `Object.getOwnPropertyDescriptor(s)`, getter lookup APIs, bound accessors, accessor values hidden in object containers, and unknown computed keys on reflection namespaces.
+- Alias propagation is capped at 64 passes and fails closed if it does not converge, so adversarial alias chains cannot make analysis unbounded.
+
+### Nonced scripts and dynamic-handler containment
+
+- Replaced `script-src 'unsafe-inline'` with a fresh 128-bit nonce for every assembled page. The CSP bridge, local-page registrar, and instrumented project scripts receive that nonce; inline event attributes and unapproved scripts do not.
+- Blocks event attributes through `setAttribute`, `setAttributeNS`, attribute-node APIs, `NamedNodeMap`, HTML sinks, and a mutation-observer backstop.
+- Seals handler-property setters across every discoverable `EventTarget`-derived browser prototype, including specialized media-element events, and blocks handler creation through `Object.defineProperty`, `Object.defineProperties`, `Reflect.defineProperty`, `__defineGetter__`, and `__defineSetter__`.
+- React's instrumented internal `noop` click assignment is narrowly recognized and ignored rather than installed. This keeps the React starter mount path working without permitting a function-valued DOM handler.
+
+### Refresh-meta containment
+
+- Existing `meta` and `link` nodes are registered before user code and their attribute maps are frozen across namespaced setters, attribute-node insertion, named-map methods, and attached `Attr.value` / `nodeValue` / `textContent` setters.
+- A bridge-owned `MutationObserver`, using captured native methods, removes any refresh meta or event attribute that reaches the tree through an unwrapped browser surface. Existing host-side unexpected-load recreation remains the final containment layer.
+- The Chrome regression uses an immediate `about:blank#refresh-escaped` target and proves the project script completes, no refresh node survives, and navigation does not begin.
+
+### Exploit regression evidence
+
+RED command:
+
+`pnpm exec vitest run lib/preview-runtime.test.ts lib/preview-runtime.browser.test.ts --reporter=verbose`
+
+Initial result: expected failure, 4 failing and 18 passing tests. Chrome proved that string, namespaced-string, and function handler assignments executed, while four benign metas became refresh directives. Unit regressions also proved the old CSP still authorized unsafe inline script and reflective aliases survived assembly.
+
+GREEN focused command:
+
+`pnpm exec vitest run lib/preview-runtime.test.ts lib/preview-runtime.browser.test.ts components/lotus/live-preview.test.tsx lib/local-bundler.test.ts components/lotus/preview-workbench.test.tsx components/lotus/editor-workspace.test.tsx`
+
+Result: PASS, 6 files and 52 tests.
+
+The bounded regressions prove:
+
+- destructured, bound, indirect, container-held, and computed-key reflection cannot recover navigation objects;
+- `Object.getOwnPropertyDescriptor(s)`, getter lookup, document prototypes, and legacy `__proto__` routes are removed with navigation diagnostics;
+- Chrome executes nonce-authorized project scripts but cannot execute string/namespaced event attributes or function handlers on generic or specialized DOM prototypes;
+- `setAttributeNS`, `setAttributeNode`, `NamedNodeMap.setNamedItem`, and attached attribute-value mutation cannot turn benign metas into immediate refresh directives;
+- the React/Vite starter still mounts after handler-property containment.
+
+### Final verification
+
+Command: `pnpm run verify`
+
+First run: typecheck and lint passed; the full suite found one stale assertion that expected an assembled script without its new nonce. The assertion was updated to require the nonce-bearing local script.
+
+Final result: PASS (exit 0), 55.9 seconds.
+
+- TypeScript: PASS, `tsc --noEmit`.
+- ESLint: PASS, no warnings or errors.
+- Tests: PASS, 13 files and 119 tests, including 2 real-Chrome security regressions.
+- Production build: PASS, Next.js 16.3.0 compiled, typechecked, collected page data, and generated all routes.
+- Audit: PASS, `No known vulnerabilities found` at the high-severity threshold.
+- Secret scan: PASS for the Fix Round 4 diff; no key, password, secret, or token patterns found.
+- Diff hygiene: PASS, `git diff --check` returned no findings.
+
+Coverage command: `pnpm run test:coverage`
+
+- All 119 tests passed.
+- `lib/preview-runtime.ts`: 88.5% statements, 78.78% branches, 97.61% functions, 94.32% lines.
+- `lib/runtime-guard.ts`: 84.68% statements, 78.3% branches, 90.9% functions, 96.68% lines.
+- Repository aggregate: 77.46% statements, 70.81% branches, 77.5% functions, 84.04% lines. Both Fix Round 4 production modules exceed 80% statement coverage; the repository has no global coverage threshold.
+
+### Security self-review
+
+- Found and closed bound accessors, `Reflect.apply`, accessor values hidden in object containers, computed reflection keys, and legacy prototype traversal after the initial reported cases were green.
+- Found and closed specialized event setters such as `HTMLMediaElement.onencrypted`, which do not live on a generic element prototype.
+- Confirmed that nonce enforcement did not create a false-positive browser test: both Chrome probes record that the authorized project script completed before containment assertions are evaluated.
+- Confirmed React compatibility after event-setter sealing; its internal instrumented no-op assignment is discarded and the starter still renders.
+- Script policy no longer contains `unsafe-inline`; inline styles remain allowed because static project CSS is intentionally self-contained in style elements.
+
+### Fix-round commits
+
+- `f3ee991` — RED nonce, reflection, Chrome handler, and mutable-meta regressions.
+- `473ceb4` — RED bound reflection and legacy prototype regressions.
+- `06daa11` — RED indirect reflection regressions.
+- `725513c` — RED specialized event-handler regression.
+- `ddda09e` — RED computed reflection-key regressions.
+- `7306cb6` — GREEN nonced CSP, reflection containment, event-surface sealing, meta mutation guards, observer backstop, and Chrome coverage.
+- `9b96b9f` — updated the inherited local-script assertion to require the generated nonce.
+
+### Scope
+
+- No Task 6 work was performed.
+- All changes stayed inside the assigned `lotus-real-product` worktree.
+- No deployment, push, credential change, paid action, or third-party mutation was performed.
