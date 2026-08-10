@@ -139,7 +139,7 @@ describe('local preview composition', () => {
     ], 'index.html')
 
     expect(document).toContain('<style data-lotus-path="styles.css">main { color: red; }</style>')
-    expect(document).toContain('<script data-lotus-path="script.js">console.info("ready")</script>')
+    expect(document).toMatch(/<script data-lotus-path="script\.js" nonce="[a-f0-9]{32}">console\.info\("ready"\)<\/script>/)
     expect(document).not.toContain('src="script.js"')
   })
 
