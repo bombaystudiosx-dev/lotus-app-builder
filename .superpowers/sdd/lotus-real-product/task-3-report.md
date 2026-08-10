@@ -34,3 +34,29 @@
 - Confirmed restore cannot overwrite an active path and failed quota creation leaves no partial file.
 - Confirmed legacy migration test retains nested file content and static runtime configuration.
 - Confirmed `git diff --check` passes.
+
+## Fix Round 1
+
+### Resolved findings
+
+- Reordered migration setup so project children are created or rebuilt only after the parent project table is valid. Existing `project_file` and `project_runtime` tables with a stale `project_legacy` foreign-key target are rebuilt safely before use.
+- Added `PRAGMA foreign_key_check` to the migration transaction. Tests verify child foreign keys target `project`, allow post-upgrade file/runtime inserts, and cascade on project deletion.
+- Stopped repeat legacy imports by atomically clearing the retired `project.files` JSON only after its normalized records are inserted. A version-3 upgrade preserves existing normalized records and retires only the old source, preventing trashed and permanently deleted files from returning after restart.
+- Made colliding legacy slash/backslash paths deterministic and lossless: each source key receives its own normalized path and retains its exact `originalPath`.
+- Archived projects are now unavailable to the builder. `runBuild` rejects them before any message insert or AI generation; tests assert no persistence or generation call.
+- Added the missing per-file cap check to duplicate operations, including grandfathered oversized normalized records.
+
+### Evidence
+
+- RED: `pnpm exec vitest run lib/db/migrations.test.ts lib/project-files.test.ts` — 4 intended regressions failed before implementation.
+- Focused GREEN: `pnpm exec vitest run app/actions/projects.test.ts lib/db/migrations.test.ts lib/project-files.test.ts` — 3 files, 15 tests passed.
+- Full verification: `pnpm run verify` — typecheck, lint, 6 Vitest files / 35 tests, production build, and high-severity audit all passed; audit reported no known vulnerabilities.
+
+### Fix Round 1 commits
+
+- `8f6c385 test: reproduce Task 3 migration integrity gaps`
+- `5861dd0 fix: harden Task 3 file migrations`
+
+### Remaining concerns
+
+- The migration lock is exercised by the production build's multi-worker startup and uses an immediate transaction. No separate timing-sensitive concurrency unit test was added because it would be flaky; foreign-key integrity and restart idempotence are covered deterministically.
