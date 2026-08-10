@@ -479,6 +479,7 @@ export default function App({ initial }: LotusBuilderProps) {
   const [projectName, setProjectName] = useState<string>(initial.name || "Untitled");
   const [generatedHtml, setGeneratedHtml] = useState<string | null>(initial.html);
   const [builderFiles, setBuilderFiles] = useState<EditorFile[]>(initial.files);
+  const [entryPath, setEntryPath] = useState(initial.entryPath);
   const [input,     setInput]     = useState("");
   const [isTyping,  setIsTyping]  = useState(false);
   const [device,    setDevice]    = useState<DeviceMode>(initial.defaultDevice);
@@ -557,7 +558,7 @@ export default function App({ initial }: LotusBuilderProps) {
         projectId,
         prompt: text,
         model: selectedModel,
-        currentHtml: builderFiles.find(file => file.path === initial.entryPath)?.content ?? generatedHtml,
+        currentHtml: builderFiles.find(file => file.path === entryPath)?.content ?? generatedHtml,
         context: {
           connectors:   connectors.filter(c=>c.connected).map(c=>c.name),
           skills:       skills.filter(s=>s.on).map(s=>s.name),
@@ -569,7 +570,7 @@ export default function App({ initial }: LotusBuilderProps) {
       setProjectId(res.projectId);
       setProjectName(res.name);
       setGeneratedHtml(res.html);
-      setBuilderFiles(current => current.map(file => file.path === initial.entryPath ? { ...file, content: res.html } : file));
+      setBuilderFiles(current => current.map(file => file.path === entryPath ? { ...file, content: res.html, version: res.version } : file));
       setView("preview");
       setMessages(p=>[...p,{ id:(Date.now()+1).toString(), role:"assistant", content:res.reply, ts:new Date() }]);
       setHistory(h=>[...h.slice(0,historyIdx+1), { label:safeText, html:res.html }]);
@@ -944,16 +945,19 @@ export default function App({ initial }: LotusBuilderProps) {
             </div>
           )}
 
-          {view==="code" && (projectId
-            ? <EditorWorkspace
+          {projectId
+            ? <div className={view === "code" ? "flex min-h-0 flex-1" : "hidden"} aria-hidden={view !== "code"}>
+              <EditorWorkspace
                 projectId={projectId}
                 files={builderFiles}
-                entryPath={initial.entryPath}
+                entryPath={entryPath}
                 initialFontSize={initial.editorFontSize}
                 onFilesChange={setBuilderFiles}
+                onEntryPathChange={setEntryPath}
                 onPreviewChange={(html) => { setGeneratedHtml(html); setAutosaved(true); }}
               />
-            : <div className="flex flex-1 items-center justify-center text-sm" style={{ color:"var(--muted-foreground)" }}>Create the project before editing files.</div>)}
+              </div>
+            : view === "code" && <div className="flex flex-1 items-center justify-center text-sm" style={{ color:"var(--muted-foreground)" }}>Create the project before editing files.</div>}
           {view==="deployed" && <DeployedPanel html={generatedHtml} projectName={projectName}/>}
 
           {/* Active build context bar */}

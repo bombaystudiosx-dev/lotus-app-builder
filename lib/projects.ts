@@ -15,7 +15,7 @@ type ProjectDatabase = BetterSQLite3Database<typeof schema> & { $client: Databas
 
 export type FileEncoding = 'utf-8' | 'utf-16le'
 export type ProjectFileInput = { path: string; content: string; encoding?: FileEncoding }
-export type ProjectFileUpdate = { content: string; encoding?: FileEncoding }
+export type ProjectFileUpdate = { content: string; encoding?: FileEncoding; expectedUpdatedAt?: Date }
 const MAX_FILE_BYTES = 1_048_576
 const MAX_PROJECT_BYTES = 5_242_880
 const SUPPORTED_ENCODINGS = new Set<FileEncoding>(['utf-8', 'utf-16le'])
@@ -291,8 +291,9 @@ export function createProjectService(database: ProjectDatabase) {
         const existing = findFile(userId, projectId, fileId)
         if (!existing) throw new ProjectLifecycleError('File not found.')
         assertAvailablePath(projectId, safePath, fileId)
-        const now = Date.now()
+        const now = Math.max(Date.now(), existing.updatedAt + 1)
         sqlite.prepare('UPDATE project_file SET path = ?, updatedAt = ? WHERE id = ? AND projectId = ?').run(safePath, now, fileId, projectId)
+        sqlite.prepare('UPDATE project_runtime SET entryPath = ?, updatedAt = ? WHERE projectId = ? AND entryPath = ?').run(safePath, now, projectId, existing.path)
         touchProject(projectId, now)
         return fileFromRow({ ...existing, path: safePath, updatedAt: now })
       })
@@ -306,7 +307,7 @@ export function createProjectService(database: ProjectDatabase) {
         if (existing.size > MAX_FILE_BYTES) throw new ProjectLifecycleError('File is too large.')
         assertAvailablePath(projectId, safePath)
         assertProjectCapacity(projectId, existing.size)
-        const now = Date.now()
+        const now = Math.max(Date.now(), existing.updatedAt + 1)
         const id = newId()
         sqlite.prepare(`INSERT INTO project_file (id, projectId, path, content, encoding, size, originalPath, deletedAt, createdAt, updatedAt)
           VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`)
@@ -320,9 +321,10 @@ export function createProjectService(database: ProjectDatabase) {
         assertWritableProject(userId, projectId)
         const existing = findFile(userId, projectId, fileId)
         if (!existing) throw new ProjectLifecycleError('File not found.')
+        if (input.expectedUpdatedAt && input.expectedUpdatedAt.getTime() !== existing.updatedAt) throw new ProjectLifecycleError('This file changed elsewhere. Reload or resolve the conflict before saving.')
         const content = validateFileInput({ path: existing.path, content: input.content, encoding: input.encoding ?? existing.encoding as FileEncoding })
         assertProjectCapacity(projectId, content.bytes, existing.size)
-        const now = Date.now()
+        const now = Math.max(Date.now(), existing.updatedAt + 1)
         sqlite.prepare('UPDATE project_file SET content = ?, encoding = ?, size = ?, updatedAt = ? WHERE id = ? AND projectId = ?')
           .run(content.content, content.encoding, content.bytes, now, fileId, projectId)
         touchProject(projectId, now)

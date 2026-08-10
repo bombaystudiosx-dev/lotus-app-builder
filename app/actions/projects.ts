@@ -22,6 +22,10 @@ function id() {
 
 const projects = createProjectService(db)
 
+function fileDto(file: Awaited<ReturnType<typeof projects.getFile>> extends infer Result ? NonNullable<Result> : never) {
+  return { id: file.id, path: file.path, content: file.content, encoding: file.encoding as 'utf-8' | 'utf-16le', version: file.updatedAt.getTime() }
+}
+
 function refreshProjectViews(projectId?: string) {
   revalidatePath('/')
   if (projectId) revalidatePath(`/projects/${projectId}`)
@@ -87,31 +91,33 @@ export async function updateSettingsAction(input: unknown) {
 export async function createProjectFileAction(projectId: string, path: string, content = '') {
   const created = await projects.createFile(await getUserId(), projectId, { path, content })
   refreshProjectViews(projectId)
-  return created
+  return fileDto(created)
 }
 
 export async function renameProjectFileAction(projectId: string, fileId: string, path: string) {
-  const updated = await projects.renameFile(await getUserId(), projectId, fileId, path)
+  const userId = await getUserId()
+  const updated = await projects.renameFile(userId, projectId, fileId, path)
+  const runtime = await projects.getRuntime(userId, projectId)
   refreshProjectViews(projectId)
-  return updated
+  return { file: fileDto(updated), entryPath: runtime?.entryPath ?? 'index.html' }
 }
 
-export async function updateProjectFileAction(projectId: string, fileId: string, content: string) {
-  const updated = await projects.updateFile(await getUserId(), projectId, fileId, { content })
+export async function updateProjectFileAction(projectId: string, fileId: string, content: string, expectedVersion?: number) {
+  const updated = await projects.updateFile(await getUserId(), projectId, fileId, { content, expectedUpdatedAt: expectedVersion === undefined ? undefined : new Date(expectedVersion) })
   refreshProjectViews(projectId)
-  return updated
+  return fileDto(updated)
 }
 
 export async function trashProjectFileAction(projectId: string, fileId: string) {
   const trashed = await projects.trashFile(await getUserId(), projectId, fileId)
   refreshProjectViews(projectId)
-  return trashed
+  return fileDto(trashed)
 }
 
 export async function restoreProjectFileAction(projectId: string, fileId: string) {
   const restored = await projects.restoreFile(await getUserId(), projectId, fileId)
   refreshProjectViews(projectId)
-  return restored
+  return fileDto(restored)
 }
 
 // Friendly model labels from the Lotus UI -> AI Gateway model ids.
@@ -153,7 +159,7 @@ export interface Workspace {
   name: string
   html: string | null
   messages: WorkspaceMessage[]
-  files: Array<{ id: string; path: string; content: string; encoding: 'utf-8' | 'utf-16le' }>
+  files: Array<{ id: string; path: string; content: string; encoding: 'utf-8' | 'utf-16le'; version: number }>
   entryPath: string
 }
 
@@ -178,7 +184,7 @@ export async function getWorkspace(projectId: string): Promise<Workspace | null>
     projectId: proj.id,
     name: redactSensitiveValues(proj.name),
     html: index ? redactSensitiveValues(index.content) : null,
-    files: files.map(({ id, path, content, encoding }) => ({ id, path, content, encoding: encoding as 'utf-8' | 'utf-16le' })),
+    files: files.map(fileDto),
     entryPath,
     messages: rows.map((r) => ({
       id: r.id,
@@ -222,6 +228,7 @@ export interface RunBuildResult {
   name: string
   html: string
   reply: string
+  version: number
 }
 
 // Derive a short, human title for a project from the first prompt.
@@ -294,7 +301,7 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
   // Persist the generated app + assistant reply.
   const index = await projects.getFileByPath(userId, projectId, 'index.html')
   if (!index) throw new Error('Project starter file is unavailable.')
-  await projects.updateFile(userId, projectId, index.id, { content: html })
+  const updatedIndex = await projects.updateFile(userId, projectId, index.id, { content: html })
 
   await db.insert(message).values({
     id: id(),
@@ -304,7 +311,7 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
     content: reply,
   })
 
-  return { projectId, name: projectName, html, reply }
+  return { projectId, name: projectName, html, reply, version: updatedIndex.updatedAt.getTime() }
 }
 
 function stripFences(text: string): string {

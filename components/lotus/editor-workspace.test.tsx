@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react'
 import '@testing-library/jest-dom/vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const actions = vi.hoisted(() => ({
@@ -36,6 +36,8 @@ describe('EditorWorkspace keyboard and data-loss boundaries', () => {
     localStorage.clear()
     actions.update.mockImplementation(async (_projectId, fileId, content) => ({ ...files.find((file) => file.id === fileId), content }))
     actions.rename.mockImplementation(async (_projectId, fileId, path) => ({ file: { ...files.find((file) => file.id === fileId), path }, entryPath: path === 'src/index.html' ? path : 'index.html' }))
+    actions.create.mockResolvedValue({ id: 'new', path: 'new.txt', content: '', encoding: 'utf-8', version: 1 })
+    actions.restore.mockResolvedValue({ id: 'new', path: 'new.txt', content: 'restored by server', encoding: 'utf-8', version: 3 })
   })
 
   it('shows a dirty tab, protects close, then saves through the normalized action', async () => {
@@ -51,7 +53,7 @@ describe('EditorWorkspace keyboard and data-loss boundaries', () => {
     expect(screen.getByRole('tab', { name: /index\.html/i })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Save file' }))
-    await waitFor(() => expect(actions.update).toHaveBeenCalledWith('lotus', 'html', '<main>Changed</main>'))
+    await waitFor(() => expect(actions.update).toHaveBeenCalledWith('lotus', 'html', '<main>Changed</main>', undefined))
     expect(onPreviewChange).toHaveBeenCalledWith(expect.stringContaining('<main>Changed</main>'))
   })
 
@@ -89,7 +91,7 @@ describe('EditorWorkspace keyboard and data-loss boundaries', () => {
 
     expect(screen.getByRole('tab', { name: /index\.html.*unsaved/i })).toHaveFocus()
     expect(screen.getByLabelText('Code editor index.html')).toHaveValue('<main>Mine</main>')
-    expect(screen.getAllByLabelText(/Code editor/)).toHaveLength(2)
+    expect(screen.getAllByRole('textbox', { name: /Code editor/, hidden: true })).toHaveLength(2)
   })
 
   it('supports tree roving focus, separator metadata, and persisted keyboard resize', () => {
@@ -107,6 +109,35 @@ describe('EditorWorkspace keyboard and data-loss boundaries', () => {
     expect(JSON.parse(localStorage.getItem('lotus:editor:lotus') ?? '{}')).toMatchObject({ treeWidth: 226 })
   })
 
+  it('protects dirty created files during operation undo and replays the returned server record', async () => {
+    vi.spyOn(window, 'prompt').mockReturnValue('new.txt')
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<EditorWorkspace projectId="lotus" files={files} entryPath="index.html" initialFontSize={14} onPreviewChange={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Create file' }))
+    await screen.findByRole('tab', { name: 'new.txt' })
+    fireEvent.change(screen.getByLabelText('Code editor new.txt'), { target: { value: 'unsaved' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Undo file operation' }))
+    expect(confirm).toHaveBeenCalled()
+    expect(actions.trash).not.toHaveBeenCalled()
+
+    confirm.mockReturnValue(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Undo file operation' }))
+    await waitFor(() => expect(actions.trash).toHaveBeenCalledWith('lotus', 'new'))
+    fireEvent.click(screen.getByRole('button', { name: 'Redo file operation' }))
+    await screen.findByRole('treeitem', { name: 'new.txt' })
+    fireEvent.click(screen.getByRole('treeitem', { name: 'new.txt' }))
+    expect(screen.getByLabelText('Code editor new.txt')).toHaveValue('restored by server')
+  })
+
+  it('restores a persisted zero-tab state without silently reopening a file', () => {
+    localStorage.setItem('lotus:editor:lotus', JSON.stringify({ openFileIds: [], activeFileId: null }))
+    render(<EditorWorkspace projectId="lotus" files={files} entryPath="index.html" initialFontSize={14} onPreviewChange={vi.fn()} />)
+
+    expect(screen.queryAllByRole('tab')).toHaveLength(0)
+    expect(screen.getByText('Open a file to start editing.')).toBeInTheDocument()
+  })
+
   it('opens, traps, escapes, and restores focus for the command palette shortcut', async () => {
     render(<EditorWorkspace projectId="lotus" files={files} entryPath="index.html" initialFontSize={14} onPreviewChange={vi.fn()} />)
     const opener = screen.getByRole('button', { name: 'Open command palette' })
@@ -116,9 +147,9 @@ describe('EditorWorkspace keyboard and data-loss boundaries', () => {
     const palette = screen.getByRole('dialog', { name: 'Command palette' })
     expect(palette).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save file' })).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Find and replace' })).toHaveFocus())
+    await waitFor(() => expect(within(palette).getByRole('button', { name: 'Find and replace' })).toHaveFocus())
     fireEvent.keyDown(palette, { key: 'Escape' })
     expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument()
-    expect(opener).toHaveFocus()
+    await waitFor(() => expect(opener).toHaveFocus())
   })
 })

@@ -25,9 +25,9 @@ import {
 } from '@/app/actions/projects'
 import { LivePreview } from '@/components/lotus/live-preview'
 import {
-  buildPreviewDocument, closeDocument, createEditorSession, diagnoseDocument, editDocument,
-  languageForPath, persistedEditorState, reopenLastClosed, saveDocument,
-  type EditorFile, type EditorSession, type PersistedEditorState,
+  applyServerFile, buildPreviewDocument, closeDocument, createEditorSession, diagnoseDocument, editDocument,
+  languageForPath, persistedEditorState, reconcileExternalFiles, removeDocument, reopenLastClosed, resolveExternalConflict,
+  type EditorFile, type PersistedEditorState,
 } from '@/lib/editor-workspace'
 
 interface EditorWorkspaceProps {
@@ -37,12 +37,13 @@ interface EditorWorkspaceProps {
   initialFontSize: number
   onPreviewChange: (html: string) => void
   onFilesChange?: (files: EditorFile[]) => void
+  onEntryPathChange?: (entryPath: string) => void
 }
 
 type ProjectOperation =
   | { kind: 'rename'; fileId: string; before: string; after: string }
-  | { kind: 'create'; file: EditorFile }
-  | { kind: 'trash'; file: EditorFile }
+  | { kind: 'create'; fileId: string }
+  | { kind: 'trash'; fileId: string }
 
 function extensionsFor(path: string, wordWrap: boolean) {
   const language = languageForPath(path)
@@ -74,34 +75,47 @@ function persisted(projectId: string): PersistedEditorState {
   }
 }
 
-function updateFiles(state: EditorSession, files: EditorFile[]): EditorSession {
-  const next = createEditorSession(files, state.projectId, { ...persistedEditorState(state), openFileIds: state.openFileIds, activeFileId: state.activeFileId })
-  for (const file of files) {
-    const previous = state.documents[file.id]
-    if (previous?.dirty && previous.path === file.path) next.documents[file.id] = previous
-  }
-  next.closedFileIds = state.closedFileIds.filter((id) => next.documents[id])
-  return next
-}
-
-export function EditorWorkspace({ projectId, files: initialFiles, entryPath, initialFontSize, onPreviewChange, onFilesChange }: EditorWorkspaceProps) {
+export function EditorWorkspace({ projectId, files: initialFiles, entryPath, initialFontSize, onPreviewChange, onFilesChange, onEntryPathChange }: EditorWorkspaceProps) {
   const [files, setFiles] = useState(initialFiles)
+  const [lastInitialFiles, setLastInitialFiles] = useState(initialFiles)
   const [session, setSession] = useState(() => createEditorSession(initialFiles, projectId, { ...persisted(projectId), fontSize: persisted(projectId).fontSize ?? initialFontSize }))
+  const [currentEntryPath, setCurrentEntryPath] = useState(entryPath)
+  const [lastEntryPath, setLastEntryPath] = useState(entryPath)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [problemsOpen, setProblemsOpen] = useState(true)
   const [operationHistory, setOperationHistory] = useState<ProjectOperation[]>([])
   const [operationIndex, setOperationIndex] = useState(-1)
-  const editorRef = useRef<ReactCodeMirrorRef>(null)
+  const editorRefs = useRef(new Map<string, ReactCodeMirrorRef>())
+  const tabRefs = useRef(new Map<string, HTMLButtonElement>())
+  const treeRefs = useRef(new Map<string, HTMLButtonElement>())
+  const [treeFocusId, setTreeFocusId] = useState(initialFiles[0]?.id ?? null)
+  const paletteRef = useRef<HTMLDivElement>(null)
+  const paletteOpenerRef = useRef<HTMLElement | null>(null)
+  const onPreviewChangeRef = useRef(onPreviewChange)
+
+  if (lastInitialFiles !== initialFiles) {
+    setLastInitialFiles(initialFiles)
+    setFiles(initialFiles)
+    setSession((current) => reconcileExternalFiles(current, initialFiles))
+  }
+  if (lastEntryPath !== entryPath) {
+    setLastEntryPath(entryPath)
+    setCurrentEntryPath(entryPath)
+  }
 
   const active = session.activeFileId ? session.documents[session.activeFileId] : null
   const diagnostics = useMemo(() => {
     const syntax = Object.values(session.documents).flatMap((document) => diagnoseDocument(document.path, document.content))
-    if (!Object.values(session.documents).some((document) => document.path === entryPath)) {
-      syntax.unshift({ path: entryPath, message: 'The configured preview entry file is missing.', line: 1, column: 1, severity: 'error' })
+    if (!Object.values(session.documents).some((document) => document.path === currentEntryPath)) {
+      syntax.unshift({ path: currentEntryPath, message: 'The configured preview entry file is missing.', line: 1, column: 1, severity: 'error' })
     }
     return syntax
-  }, [entryPath, session.documents])
-  const preview = useMemo(() => buildPreviewDocument(Object.values(session.documents), entryPath), [entryPath, session.documents])
+  }, [currentEntryPath, session.documents])
+  const preview = useMemo(() => buildPreviewDocument(Object.values(session.documents), currentEntryPath), [currentEntryPath, session.documents])
+  const visibleFiles = useMemo(() => Object.values(session.documents).sort((a, b) => a.path.localeCompare(b.path)), [session.documents])
+
+  useEffect(() => { onPreviewChangeRef.current = onPreviewChange }, [onPreviewChange])
+  useEffect(() => onPreviewChangeRef.current(preview), [preview])
 
   useEffect(() => {
     localStorage.setItem(`lotus:editor:${projectId}`, JSON.stringify(persistedEditorState(session)))
@@ -118,26 +132,55 @@ export function EditorWorkspace({ projectId, files: initialFiles, entryPath, ini
     return () => window.removeEventListener('beforeunload', protect)
   }, [session.documents])
 
+  function openPalette() {
+    paletteOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setPaletteOpen(true)
+  }
+
+  function closePalette() {
+    setPaletteOpen(false)
+    requestAnimationFrame(() => paletteOpenerRef.current?.focus())
+  }
+
+  useEffect(() => {
+    if (!paletteOpen) return
+    const dialog = paletteRef.current
+    const focusable = () => [...(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled)') ?? [])]
+    dialog?.querySelector<HTMLElement>('[data-command]:not(:disabled)')?.focus()
+    const trap = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); closePalette(); return }
+      if (event.key !== 'Tab') return
+      const items = focusable()
+      if (!items.length) return
+      const index = items.indexOf(document.activeElement as HTMLElement)
+      const next = event.shiftKey ? (index <= 0 ? items.length - 1 : index - 1) : (index === items.length - 1 ? 0 : index + 1)
+      event.preventDefault()
+      items[next].focus()
+    }
+    dialog?.addEventListener('keydown', trap)
+    return () => dialog?.removeEventListener('keydown', trap)
+  }, [paletteOpen])
+
   const saveActive = useCallback(async () => {
-    if (!active || !active.dirty) return
+    if (!active || !active.dirty || active.conflict) return
     try {
-      await updateProjectFileAction(projectId, active.id, active.content)
-      setSession((current) => saveDocument(current, active.id, active.content))
-      const nextFiles = files.map((file) => file.id === active.id ? { ...file, content: active.content } : file)
+      const serverFile = await updateProjectFileAction(projectId, active.id, active.content, active.version)
+      setSession((current) => applyServerFile(current, serverFile))
+      const nextFiles = files.map((file) => file.id === active.id ? serverFile : file)
       setFiles(nextFiles)
       onFilesChange?.(nextFiles)
-      onPreviewChange(buildPreviewDocument(nextFiles, entryPath))
+      onPreviewChange(buildPreviewDocument(nextFiles, currentEntryPath))
       toast.success(`${active.path} saved`)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not save the file.')
     }
-  }, [active, entryPath, files, onFilesChange, onPreviewChange, projectId])
+  }, [active, currentEntryPath, files, onFilesChange, onPreviewChange, projectId])
 
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'p') {
         event.preventDefault()
-        setPaletteOpen(true)
+        openPalette()
       } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         event.preventDefault()
         void saveActive()
@@ -179,12 +222,15 @@ export function EditorWorkspace({ projectId, files: initialFiles, entryPath, ini
     if (!path) return
     try {
       const created = await createProjectFileAction(projectId, path, '')
-      const file: EditorFile = { id: created.id, path: created.path, content: created.content, encoding: created.encoding as EditorFile['encoding'] }
+      const file: EditorFile = created
       const nextFiles = [...files, file].sort((a, b) => a.path.localeCompare(b.path))
       setFiles(nextFiles)
-      setSession((current) => ({ ...updateFiles(current, nextFiles), openFileIds: [...current.openFileIds, file.id], activeFileId: file.id }))
+      setSession((current) => {
+        const next = applyServerFile(current, file, false)
+        return { ...next, openFileIds: [...current.openFileIds.filter((id) => id !== file.id), file.id], activeFileId: file.id }
+      })
       onFilesChange?.(nextFiles)
-      recordOperation({ kind: 'create', file })
+      recordOperation({ kind: 'create', fileId: file.id })
     } catch (error) { toast.error(error instanceof Error ? error.message : 'Could not create the file.') }
   }
 
@@ -194,10 +240,12 @@ export function EditorWorkspace({ projectId, files: initialFiles, entryPath, ini
     if (!path || path === active.path) return
     try {
       const before = active.path
-      await renameProjectFileAction(projectId, active.id, path)
-      const nextFiles = files.map((file) => file.id === active.id ? { ...file, path } : file).sort((a, b) => a.path.localeCompare(b.path))
+      const result = await renameProjectFileAction(projectId, active.id, path)
+      const nextFiles = files.map((file) => file.id === active.id ? result.file : file).sort((a, b) => a.path.localeCompare(b.path))
       setFiles(nextFiles)
-      setSession((current) => updateFiles(current, nextFiles))
+      setSession((current) => applyServerFile(current, result.file))
+      setCurrentEntryPath(result.entryPath)
+      onEntryPathChange?.(result.entryPath)
       onFilesChange?.(nextFiles)
       recordOperation({ kind: 'rename', fileId: active.id, before, after: path })
     } catch (error) { toast.error(error instanceof Error ? error.message : 'Could not move the file.') }
@@ -209,13 +257,12 @@ export function EditorWorkspace({ projectId, files: initialFiles, entryPath, ini
     if (!active.dirty && !window.confirm(`Move ${active.path} to trash?`)) return
     try {
       await trashProjectFileAction(projectId, active.id)
-      const file = files.find((candidate) => candidate.id === active.id)!
       const nextFiles = files.filter((candidate) => candidate.id !== active.id)
       setFiles(nextFiles)
-      setSession((current) => updateFiles(current, nextFiles))
+      setSession((current) => removeDocument(current, active.id, { discard: true }).state)
       onFilesChange?.(nextFiles)
-      onPreviewChange(buildPreviewDocument(nextFiles, entryPath))
-      recordOperation({ kind: 'trash', file })
+      onPreviewChange(buildPreviewDocument(nextFiles, currentEntryPath))
+      recordOperation({ kind: 'trash', fileId: active.id })
     } catch (error) { toast.error(error instanceof Error ? error.message : 'Could not delete the file.') }
   }
 
@@ -225,31 +272,43 @@ export function EditorWorkspace({ projectId, files: initialFiles, entryPath, ini
     if (!operation) return
     try {
       let nextFiles = files
+      let nextEntryPath = currentEntryPath
       if (operation.kind === 'rename') {
         const path = direction === 'undo' ? operation.before : operation.after
-        await renameProjectFileAction(projectId, operation.fileId, path)
-        nextFiles = files.map((file) => file.id === operation.fileId ? { ...file, path } : file)
+        const result = await renameProjectFileAction(projectId, operation.fileId, path)
+        nextFiles = files.map((file) => file.id === operation.fileId ? result.file : file)
+        setSession((current) => applyServerFile(current, result.file))
+        setCurrentEntryPath(result.entryPath)
+        nextEntryPath = result.entryPath
+        onEntryPathChange?.(result.entryPath)
       } else if (operation.kind === 'create') {
         if (direction === 'undo') {
-          await trashProjectFileAction(projectId, operation.file.id)
-          nextFiles = files.filter((file) => file.id !== operation.file.id)
+          const document = session.documents[operation.fileId]
+          if (document?.dirty && !window.confirm('Undoing file creation discards unsaved changes. Continue?')) return
+          await trashProjectFileAction(projectId, operation.fileId)
+          nextFiles = files.filter((file) => file.id !== operation.fileId)
+          setSession((current) => removeDocument(current, operation.fileId, { discard: true }).state)
         } else {
-          await restoreProjectFileAction(projectId, operation.file.id)
-          nextFiles = [...files, operation.file]
+          const restored = await restoreProjectFileAction(projectId, operation.fileId)
+          nextFiles = [...files, restored]
+          setSession((current) => applyServerFile(current, restored, false))
         }
       } else if (direction === 'undo') {
-        await restoreProjectFileAction(projectId, operation.file.id)
-        nextFiles = [...files, operation.file]
+        const restored = await restoreProjectFileAction(projectId, operation.fileId)
+        nextFiles = [...files, restored]
+        setSession((current) => applyServerFile(current, restored, false))
       } else {
-        await trashProjectFileAction(projectId, operation.file.id)
-        nextFiles = files.filter((file) => file.id !== operation.file.id)
+        const document = session.documents[operation.fileId]
+        if (document?.dirty && !window.confirm('Redoing delete discards unsaved changes. Continue?')) return
+        await trashProjectFileAction(projectId, operation.fileId)
+        nextFiles = files.filter((file) => file.id !== operation.fileId)
+        setSession((current) => removeDocument(current, operation.fileId, { discard: true }).state)
       }
       nextFiles = [...nextFiles].sort((a, b) => a.path.localeCompare(b.path))
       setFiles(nextFiles)
-      setSession((current) => updateFiles(current, nextFiles))
       setOperationIndex(direction === 'undo' ? index - 1 : index)
       onFilesChange?.(nextFiles)
-      onPreviewChange(buildPreviewDocument(nextFiles, entryPath))
+      onPreviewChange(buildPreviewDocument(nextFiles, nextEntryPath))
     } catch (error) { toast.error(error instanceof Error ? error.message : `Could not ${direction} the file operation.`) }
   }
 
@@ -262,7 +321,7 @@ export function EditorWorkspace({ projectId, files: initialFiles, entryPath, ini
 
   function goToLine() {
     const requested = Number(window.prompt('Go to line'))
-    const view = editorRef.current?.view
+    const view = active ? editorRefs.current.get(active.id)?.view : undefined
     if (!view || !Number.isInteger(requested) || requested < 1) return
     const line = view.state.doc.line(Math.min(requested, view.state.doc.lines))
     view.dispatch({ selection: { anchor: line.from }, scrollIntoView: true })
@@ -296,7 +355,7 @@ export function EditorWorkspace({ projectId, files: initialFiles, entryPath, ini
   }
 
   const commands = [
-    { id: 'save', label: 'Save current file', disabled: !active?.dirty },
+    { id: 'save', label: 'Save current file', disabled: !active?.dirty || active.conflict },
     { id: 'find', label: 'Find and replace' },
     { id: 'line', label: 'Go to line' },
     { id: 'format', label: 'Format JSON document', disabled: !active || languageForPath(active.path) !== 'json' },
@@ -307,13 +366,32 @@ export function EditorWorkspace({ projectId, files: initialFiles, entryPath, ini
 
   function runCommand(id: string) {
     if (id === 'save') void saveActive()
-    if (id === 'find' && editorRef.current?.view) openSearchPanel(editorRef.current.view)
+    const view = active ? editorRefs.current.get(active.id)?.view : undefined
+    if (id === 'find' && view) openSearchPanel(view)
     if (id === 'line') goToLine()
     if (id === 'format') formatActive()
     if (id === 'wrap') setSession((current) => ({ ...current, wordWrap: !current.wordWrap }))
     if (id === 'reopen') setSession(reopenLastClosed)
     if (id === 'create') void createFile()
-    setPaletteOpen(false)
+    closePalette()
+  }
+
+  function moveTabFocus(fileId: string, key: string) {
+    const ids = session.openFileIds
+    const current = ids.indexOf(fileId)
+    const next = key === 'Home' ? 0 : key === 'End' ? ids.length - 1 : key === 'ArrowRight' ? (current + 1) % ids.length : key === 'ArrowLeft' ? (current - 1 + ids.length) % ids.length : current
+    if (next === current || !ids[next]) return
+    openFile(ids[next])
+    tabRefs.current.get(ids[next])?.focus()
+  }
+
+  function moveTreeFocus(fileId: string, key: string) {
+    const ids = visibleFiles.map((file) => file.id)
+    const current = ids.indexOf(fileId)
+    const next = key === 'Home' ? 0 : key === 'End' ? ids.length - 1 : key === 'ArrowDown' ? Math.min(ids.length - 1, current + 1) : key === 'ArrowUp' ? Math.max(0, current - 1) : current
+    if (!ids[next]) return
+    setTreeFocusId(ids[next])
+    treeRefs.current.get(ids[next])?.focus()
   }
 
   return <div className="flex min-h-0 flex-1 flex-col overflow-hidden" onKeyDown={(event) => event.stopPropagation()}>
@@ -323,10 +401,12 @@ export function EditorWorkspace({ projectId, files: initialFiles, entryPath, ini
           <span className="flex items-center gap-1.5 text-[10px] font-semibold tracking-[.08em]"><FolderTree size={12}/> FILES</span>
           <button type="button" aria-label="Create file" title="Create file" onClick={() => void createFile()}><FilePlus2 size={14}/></button>
         </div>
-        <div role="tree" className="min-h-0 flex-1 overflow-y-auto py-1">
-          {files.map((file) => <button key={file.id} type="button" role="treeitem" aria-selected={active?.id === file.id} onClick={() => openFile(file.id)}
+        <div role="tree" aria-label="File tree" className="min-h-0 flex-1 overflow-y-auto py-1">
+          {visibleFiles.map((file) => <button key={file.id} type="button" role="treeitem" aria-selected={active?.id === file.id} tabIndex={treeFocusId === file.id ? 0 : -1}
+            ref={(node) => { if (node) treeRefs.current.set(file.id, node); else treeRefs.current.delete(file.id) }}
+            onFocus={() => setTreeFocusId(file.id)} onClick={() => openFile(file.id)} onKeyDown={(event) => { if (['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) { event.preventDefault(); moveTreeFocus(file.id, event.key) }; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openFile(file.id) } }}
             className="flex w-full items-center gap-2 truncate px-3 py-1.5 text-left text-[11px] hover:bg-[var(--muted)]"
-            style={{ background: active?.id === file.id ? 'var(--muted)' : undefined }}><FileText size={12}/><span className="truncate">{file.path}</span></button>)}
+            style={{ background: active?.id === file.id ? 'var(--muted)' : undefined }}><FileText size={12}/><span className="truncate">{file.path}</span>{file.conflict && <span className="ml-auto text-[var(--destructive)]" aria-label="conflict">!</span>}</button>)}
         </div>
         <div className="grid grid-cols-2 gap-1 border-t p-2">
           <button type="button" onClick={() => void renameActive('rename')} disabled={!active} className="rounded bg-[var(--muted)] px-2 py-1 text-[10px] disabled:opacity-40">Rename</button>
@@ -336,7 +416,7 @@ export function EditorWorkspace({ projectId, files: initialFiles, entryPath, ini
         </div>
       </aside>
 
-      <button type="button" role="separator" aria-label="Resize file tree" aria-orientation="vertical" tabIndex={0} onPointerDown={(event) => beginResize('treeWidth', event)} onKeyDown={(event) => { if (event.key === 'ArrowLeft') resize('treeWidth', -16); if (event.key === 'ArrowRight') resize('treeWidth', 16) }} className="w-1 cursor-col-resize bg-[var(--border)] hover:bg-[var(--accent)]"/>
+      <button type="button" role="separator" aria-label="Resize file tree" aria-orientation="vertical" aria-valuemin={160} aria-valuemax={360} aria-valuenow={session.layout.treeWidth} tabIndex={0} onPointerDown={(event) => beginResize('treeWidth', event)} onKeyDown={(event) => { if (event.key === 'ArrowLeft') resize('treeWidth', -16); if (event.key === 'ArrowRight') resize('treeWidth', 16) }} className="w-1 cursor-col-resize bg-[var(--border)] hover:bg-[var(--accent)]"/>
 
       <section aria-label="Code editor workspace" className="flex min-w-0 flex-1 flex-col">
         <div role="tablist" aria-label="Open files" className="flex min-h-9 overflow-x-auto border-b bg-[var(--card)]">
@@ -344,16 +424,21 @@ export function EditorWorkspace({ projectId, files: initialFiles, entryPath, ini
             const document = session.documents[fileId]
             if (!document) return null
             return <div key={fileId} className="flex shrink-0 items-center border-r">
-              <button type="button" role="tab" aria-selected={active?.id === fileId} aria-label={`${document.path}${document.dirty ? ' — unsaved changes' : ''}`} onClick={() => openFile(fileId)} className="flex h-full items-center gap-1.5 px-3 text-[11px]" style={{ background: active?.id === fileId ? 'var(--background)' : undefined }}>
+              <button type="button" role="tab" aria-selected={active?.id === fileId} tabIndex={active?.id === fileId ? 0 : -1} ref={(node) => { if (node) tabRefs.current.set(fileId, node); else tabRefs.current.delete(fileId) }} aria-label={`${document.path}${document.dirty ? ' — unsaved changes' : ''}${document.conflict ? ' — conflict' : ''}`} onClick={() => openFile(fileId)} onKeyDown={(event) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); moveTabFocus(fileId, event.key) } }} className="flex h-full items-center gap-1.5 px-3 text-[11px]" style={{ background: active?.id === fileId ? 'var(--background)' : undefined }}>
                 {document.dirty && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]"/>}{document.path}
               </button>
               <button type="button" aria-label={`Close ${document.path}`} onClick={() => closeFile(fileId)} className="mr-1 rounded p-1 hover:bg-[var(--muted)]"><X size={11}/></button>
             </div>
           })}
         </div>
+        {active?.conflict && <div role="alert" className="flex items-center gap-2 border-b bg-[color-mix(in_srgb,var(--destructive)_12%,var(--card))] px-3 py-2 text-[11px]">
+          <AlertTriangle size={13}/><span className="flex-1">{active.path} changed outside this editor. Choose which version to keep before saving.</span>
+          {active.externalContent !== null && <button type="button" onClick={() => setSession((current) => resolveExternalConflict(current, active.id, 'mine'))} className="rounded bg-[var(--muted)] px-2 py-1">Keep mine</button>}
+          <button type="button" onClick={() => setSession((current) => resolveExternalConflict(current, active.id, 'external'))} className="rounded bg-[var(--destructive)] px-2 py-1 text-white">Use external</button>
+        </div>}
         <div className="flex min-h-9 items-center gap-1 border-b bg-[var(--card)] px-2">
-          <button type="button" aria-label="Save file" title="Save file (Ctrl+S)" onClick={() => void saveActive()} disabled={!active?.dirty} className="rounded p-1.5 hover:bg-[var(--muted)] disabled:opacity-35"><Save size={13}/></button>
-          <button type="button" aria-label="Find and replace" title="Find and replace (Ctrl+F)" onClick={() => editorRef.current?.view && openSearchPanel(editorRef.current.view)} className="rounded p-1.5 hover:bg-[var(--muted)]"><Search size={13}/></button>
+          <button type="button" aria-label="Save file" title="Save file (Ctrl+S)" onClick={() => void saveActive()} disabled={!active?.dirty || active.conflict} className="rounded p-1.5 hover:bg-[var(--muted)] disabled:opacity-35"><Save size={13}/></button>
+          <button type="button" aria-label="Find and replace" title="Find and replace (Ctrl+F)" onClick={() => { const view = active ? editorRefs.current.get(active.id)?.view : undefined; if (view) openSearchPanel(view) }} className="rounded p-1.5 hover:bg-[var(--muted)]"><Search size={13}/></button>
           <button type="button" aria-label="Go to line" onClick={goToLine} className="rounded p-1.5 hover:bg-[var(--muted)]"><ListRestart size={13}/></button>
           <button type="button" aria-label="Format document" title={active && languageForPath(active.path) === 'json' ? 'Format JSON document' : 'Formatting is available for JSON'} onClick={formatActive} disabled={!active || languageForPath(active.path) !== 'json'} className="rounded p-1.5 hover:bg-[var(--muted)] disabled:opacity-35"><Braces size={13}/></button>
           <button type="button" aria-label="Toggle word wrap" aria-pressed={session.wordWrap} onClick={() => setSession((current) => ({ ...current, wordWrap: !current.wordWrap }))} className="rounded p-1.5 hover:bg-[var(--muted)]"><WrapText size={13}/></button>
@@ -361,20 +446,27 @@ export function EditorWorkspace({ projectId, files: initialFiles, entryPath, ini
             <button type="button" aria-label="Decrease editor font size" onClick={() => setSession((current) => ({ ...current, fontSize: Math.max(12, current.fontSize - 1) }))}><Minus size={11}/></button>
             <span aria-label="Editor font size">{session.fontSize}px</span>
             <button type="button" aria-label="Increase editor font size" onClick={() => setSession((current) => ({ ...current, fontSize: Math.min(24, current.fontSize + 1) }))}><Plus size={11}/></button>
-            <button type="button" aria-label="Open command palette" title="Command palette (Ctrl+Shift+P)" onClick={() => setPaletteOpen(true)} className="ml-2 flex items-center gap-1 rounded bg-[var(--muted)] px-2 py-1"><Settings2 size={11}/> Commands</button>
+            <button type="button" aria-label="Open command palette" title="Command palette (Ctrl+Shift+P)" onClick={openPalette} className="ml-2 flex items-center gap-1 rounded bg-[var(--muted)] px-2 py-1"><Settings2 size={11}/> Commands</button>
             <button type="button" aria-label="Delete file" onClick={() => void trashActive()} disabled={!active} className="rounded p-1.5 text-[var(--destructive)] disabled:opacity-35"><Trash2 size={13}/></button>
           </div>
         </div>
-        <div className="min-h-0 flex-1">
-          {active ? <CodeMirror ref={editorRef} key={active.id} value={active.content} onChange={(value) => setSession((current) => editDocument(current, active.id, value))} extensions={extensionsFor(active.path, session.wordWrap)} basicSetup={{ foldGutter: true, highlightActiveLine: true, autocompletion: true }} style={{ height: '100%', fontSize: session.fontSize }} height="100%"/> : <div className="flex h-full items-center justify-center text-sm text-[var(--muted-foreground)]">Open a file to start editing.</div>}
+        <div className="relative min-h-0 flex-1">
+          {session.openFileIds.map((fileId) => {
+            const document = session.documents[fileId]
+            if (!document) return null
+            return <div key={fileId} hidden={active?.id !== fileId} className="absolute inset-0">
+              <CodeMirror ref={(instance) => { if (instance) editorRefs.current.set(fileId, instance); else editorRefs.current.delete(fileId) }} value={document.content} onChange={(value) => setSession((current) => editDocument(current, fileId, value))} extensions={extensionsFor(document.path, session.wordWrap)} basicSetup={{ foldGutter: true, highlightActiveLine: true, autocompletion: true }} aria-label={`Code editor ${document.path}`} data-path={document.path} style={{ height: '100%', fontSize: session.fontSize }} height="100%"/>
+            </div>
+          })}
+          {!active && <div className="flex h-full items-center justify-center text-sm text-[var(--muted-foreground)]">Open a file to start editing.</div>}
         </div>
       </section>
 
-      <button type="button" role="separator" aria-label="Resize preview" aria-orientation="vertical" tabIndex={0} onPointerDown={(event) => beginResize('previewWidth', event)} onKeyDown={(event) => { if (event.key === 'ArrowLeft') resize('previewWidth', 16); if (event.key === 'ArrowRight') resize('previewWidth', -16) }} className="w-1 cursor-col-resize bg-[var(--border)] hover:bg-[var(--accent)]"/>
+      <button type="button" role="separator" aria-label="Resize preview" aria-orientation="vertical" aria-valuemin={260} aria-valuemax={720} aria-valuenow={session.layout.previewWidth} tabIndex={0} onPointerDown={(event) => beginResize('previewWidth', event)} onKeyDown={(event) => { if (event.key === 'ArrowLeft') resize('previewWidth', 16); if (event.key === 'ArrowRight') resize('previewWidth', -16) }} className="w-1 cursor-col-resize bg-[var(--border)] hover:bg-[var(--accent)]"/>
       <aside aria-label="Live code preview" className="shrink-0 bg-white" style={{ width: session.layout.previewWidth }}><LivePreview html={preview}/></aside>
     </div>
 
-    {problemsOpen && <button type="button" role="separator" aria-label="Resize problems panel" aria-orientation="horizontal" onPointerDown={(event) => beginResize('problemsHeight', event)} onKeyDown={(event) => { if (event.key === 'ArrowUp') resize('problemsHeight', 16); if (event.key === 'ArrowDown') resize('problemsHeight', -16) }} className="h-1 w-full cursor-row-resize bg-[var(--border)] hover:bg-[var(--accent)]"/>}
+    {problemsOpen && <button type="button" role="separator" aria-label="Resize problems panel" aria-orientation="horizontal" aria-valuemin={96} aria-valuemax={320} aria-valuenow={session.layout.problemsHeight} onPointerDown={(event) => beginResize('problemsHeight', event)} onKeyDown={(event) => { if (event.key === 'ArrowUp') resize('problemsHeight', 16); if (event.key === 'ArrowDown') resize('problemsHeight', -16) }} className="h-1 w-full cursor-row-resize bg-[var(--border)] hover:bg-[var(--accent)]"/>}
     <section aria-label="Problems" className="shrink-0 overflow-hidden border-t bg-[var(--card)]" style={{ height: problemsOpen ? session.layout.problemsHeight : 34 }}>
       <button type="button" aria-expanded={problemsOpen} onClick={() => setProblemsOpen((open) => !open)} className="flex h-8 w-full items-center gap-2 px-3 text-left text-[11px] font-semibold"><PanelBottom size={12}/> Problems <span className="rounded-full bg-[var(--muted)] px-2 py-0.5">{diagnostics.length}</span><ChevronDown size={12} className={`ml-auto transition-transform ${problemsOpen ? 'rotate-180' : ''}`}/></button>
       {problemsOpen && <div className="h-[calc(100%-2rem)] overflow-y-auto border-t py-1">
@@ -382,10 +474,10 @@ export function EditorWorkspace({ projectId, files: initialFiles, entryPath, ini
       </div>}
     </section>
 
-    {paletteOpen && <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/35 p-8" onMouseDown={(event) => { if (event.currentTarget === event.target) setPaletteOpen(false) }}>
-      <div role="dialog" aria-label="Command palette" aria-modal="true" className="mt-[10vh] w-full max-w-md overflow-hidden rounded-xl border bg-[var(--popover)] shadow-2xl">
-        <div className="flex items-center gap-2 border-b px-3 py-2"><Search size={14}/><span className="text-xs text-[var(--muted-foreground)]">Common local actions</span><button type="button" aria-label="Close command palette" onClick={() => setPaletteOpen(false)} className="ml-auto"><X size={14}/></button></div>
-        <div className="max-h-80 overflow-y-auto p-1">{commands.map((command) => <button type="button" key={command.label} disabled={command.disabled} onClick={() => runCommand(command.id)} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-[var(--muted)] disabled:opacity-35">{command.label}</button>)}</div>
+    {paletteOpen && <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/35 p-8" onMouseDown={(event) => { if (event.currentTarget === event.target) closePalette() }}>
+      <div ref={paletteRef} role="dialog" aria-label="Command palette" aria-modal="true" className="mt-[10vh] w-full max-w-md overflow-hidden rounded-xl border bg-[var(--popover)] shadow-2xl">
+        <div className="flex items-center gap-2 border-b px-3 py-2"><Search size={14}/><span className="text-xs text-[var(--muted-foreground)]">Common local actions</span><button type="button" aria-label="Close command palette" onClick={closePalette} className="ml-auto"><X size={14}/></button></div>
+        <div className="max-h-80 overflow-y-auto p-1">{commands.map((command) => <button type="button" data-command key={command.label} disabled={command.disabled} onClick={() => runCommand(command.id)} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-[var(--muted)] disabled:opacity-35">{command.label}</button>)}</div>
         <p className="border-t px-3 py-2 text-[10px] text-[var(--muted-foreground)]">Ctrl+Shift+P palette · Ctrl+S save · Ctrl+F find · Ctrl+Shift+T reopen</p>
       </div>
     </div>}

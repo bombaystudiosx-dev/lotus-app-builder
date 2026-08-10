@@ -5,11 +5,16 @@ export interface EditorFile {
   path: string
   content: string
   encoding: 'utf-8' | 'utf-16le'
+  version?: number
 }
 
 export interface EditorDocument extends EditorFile {
   savedContent: string
   dirty: boolean
+  conflict?: boolean
+  externalContent?: string | null
+  externalPath?: string
+  externalVersion?: number
 }
 
 export interface PersistedEditorState {
@@ -48,7 +53,7 @@ export function createEditorSession(files: EditorFile[], projectId: string, pers
   const documents = Object.fromEntries(files.map((file) => [file.id, { ...file, savedContent: file.content, dirty: false }]))
   const validIds = new Set(files.map((file) => file.id))
   const persistedOpen = (persisted.openFileIds ?? []).filter((id, index, ids) => validIds.has(id) && ids.indexOf(id) === index)
-  const openFileIds = persistedOpen.length ? persistedOpen : files.slice(0, 1).map((file) => file.id)
+  const openFileIds = persisted.openFileIds === undefined ? files.slice(0, 1).map((file) => file.id) : persistedOpen
   const activeFileId = persisted.activeFileId && openFileIds.includes(persisted.activeFileId)
     ? persisted.activeFileId
     : openFileIds.at(-1) ?? null
@@ -97,6 +102,66 @@ export function saveDocument(state: EditorSession, fileId: string, savedContent:
   }
 }
 
+export function applyServerFile(state: EditorSession, file: EditorFile, preserveDirty = true): EditorSession {
+  const previous = state.documents[file.id]
+  const document: EditorDocument = previous?.dirty && preserveDirty
+    ? { ...previous, path: file.path, encoding: file.encoding, version: file.version, savedContent: file.content, dirty: previous.content !== file.content, conflict: false, externalContent: undefined, externalPath: undefined, externalVersion: undefined }
+    : { ...file, savedContent: file.content, dirty: false }
+  return { ...state, documents: { ...state.documents, [file.id]: document } }
+}
+
+export function reconcileExternalFiles(state: EditorSession, files: EditorFile[]): EditorSession {
+  const incoming = new Map(files.map((file) => [file.id, file]))
+  const documents: Record<string, EditorDocument> = {}
+  for (const file of files) {
+    const previous = state.documents[file.id]
+    if (!previous) {
+      documents[file.id] = { ...file, savedContent: file.content, dirty: false }
+      continue
+    }
+    const changed = previous.savedContent !== file.content || previous.path !== file.path || (file.version !== undefined && previous.version !== file.version)
+    if (previous.dirty && changed) {
+      documents[file.id] = { ...previous, conflict: true, externalContent: file.content, externalPath: file.path, externalVersion: file.version }
+    } else if (changed) {
+      documents[file.id] = { ...file, savedContent: file.content, dirty: false }
+    } else {
+      documents[file.id] = previous
+    }
+  }
+  for (const previous of Object.values(state.documents)) {
+    if (!incoming.has(previous.id) && previous.dirty) documents[previous.id] = { ...previous, conflict: true, externalContent: null }
+  }
+  const validIds = new Set(Object.keys(documents))
+  const openFileIds = state.openFileIds.filter((id) => validIds.has(id))
+  return {
+    ...state,
+    documents,
+    openFileIds,
+    activeFileId: state.activeFileId && validIds.has(state.activeFileId) ? state.activeFileId : openFileIds.at(-1) ?? null,
+    closedFileIds: state.closedFileIds.filter((id) => validIds.has(id)),
+  }
+}
+
+export function resolveExternalConflict(state: EditorSession, fileId: string, resolution: 'external' | 'mine'): EditorSession {
+  const document = state.documents[fileId]
+  if (!document?.conflict) return state
+  const externalContent = document.externalContent
+  if (externalContent === undefined) return state
+  if (externalContent === null) {
+    if (resolution === 'mine') return state
+    const { [fileId]: removed, ...documents } = state.documents
+    void removed
+    const openFileIds = state.openFileIds.filter((id) => id !== fileId)
+    return { ...state, documents, openFileIds, activeFileId: state.activeFileId === fileId ? openFileIds.at(-1) ?? null : state.activeFileId }
+  }
+  const path = document.externalPath ?? document.path
+  const version = document.externalVersion ?? document.version
+  if (resolution === 'external') {
+    return { ...state, documents: { ...state.documents, [fileId]: { ...document, path, version, content: externalContent, savedContent: externalContent, dirty: false, conflict: false, externalContent: undefined, externalPath: undefined, externalVersion: undefined } } }
+  }
+  return { ...state, documents: { ...state.documents, [fileId]: { ...document, path, version, savedContent: externalContent, dirty: document.content !== externalContent, conflict: false, externalContent: undefined, externalPath: undefined, externalVersion: undefined } } }
+}
+
 export function closeDocument(state: EditorSession, fileId: string, options: { discard?: boolean } = {}) {
   const document = state.documents[fileId]
   if (!document || !state.openFileIds.includes(fileId)) return { state, blocked: false }
@@ -126,6 +191,25 @@ export function reopenLastClosed(state: EditorSession): EditorSession {
     openFileIds: [...state.openFileIds.filter((id) => id !== fileId), fileId],
     activeFileId: fileId,
     closedFileIds: state.closedFileIds.slice(0, -1),
+  }
+}
+
+export function removeDocument(state: EditorSession, fileId: string, options: { discard?: boolean } = {}) {
+  const document = state.documents[fileId]
+  if (!document) return { state, blocked: false }
+  if (document.dirty && !options.discard) return { state, blocked: true }
+  const { [fileId]: removed, ...documents } = state.documents
+  void removed
+  const openFileIds = state.openFileIds.filter((id) => id !== fileId)
+  return {
+    blocked: false,
+    state: {
+      ...state,
+      documents,
+      openFileIds,
+      activeFileId: state.activeFileId === fileId ? openFileIds.at(-1) ?? null : state.activeFileId,
+      closedFileIds: state.closedFileIds.filter((id) => id !== fileId),
+    },
   }
 }
 
@@ -181,7 +265,60 @@ export function diagnoseDocument(path: string, content: string): EditorDiagnosti
       : []
   }
 
+  if (language === 'markdown') {
+    const fences = [...content.matchAll(/^\s*```/gm)]
+    if (fences.length % 2 === 1) {
+      const offset = fences.at(-1)?.index ?? 0
+      return [{ path, message: 'Unclosed fenced code block.', ...locationFromOffset(content, offset), severity: 'error' }]
+    }
+    return []
+  }
+
+  if (language === 'css' || language === 'javascript' || language === 'typescript') {
+    const stack: Array<{ character: string; offset: number }> = []
+    const pairs: Record<string, string> = { '}': '{', ']': '[', ')': '(' }
+    let quote = ''
+    let lineComment = false
+    let blockComment = false
+    for (let index = 0; index < content.length; index += 1) {
+      const character = content[index]
+      const next = content[index + 1]
+      if (lineComment) { if (character === '\n') lineComment = false; continue }
+      if (blockComment) { if (character === '*' && next === '/') { blockComment = false; index += 1 }; continue }
+      if (quote) { if (character === '\\') { index += 1; continue }; if (character === quote) quote = ''; continue }
+      if ((language === 'javascript' || language === 'typescript') && character === '/' && next === '/') { lineComment = true; index += 1; continue }
+      if (character === '/' && next === '*') { blockComment = true; index += 1; continue }
+      if (character === '"' || character === "'" || character === '`') { quote = character; continue }
+      if (character === '{' || character === '[' || character === '(') stack.push({ character, offset: index })
+      if (pairs[character]) {
+        const open = stack.pop()
+        if (!open || open.character !== pairs[character]) return [{ path, message: `Unexpected ${character}.`, ...locationFromOffset(content, index), severity: 'error' }]
+      }
+    }
+    const open = stack.at(-1)
+    if (open) return [{ path, message: `Unclosed ${open.character}.`, ...locationFromOffset(content, open.offset), severity: 'error' }]
+    if (quote) return [{ path, message: 'Unclosed string literal.', ...locationFromOffset(content, content.length), severity: 'error' }]
+    if (blockComment) return [{ path, message: 'Unclosed block comment.', ...locationFromOffset(content, content.length), severity: 'error' }]
+  }
+
   return []
+}
+
+export function resolveProjectReference(entryPath: string, reference: string) {
+  const cleanReference = reference.split(/[?#]/, 1)[0]
+  if (!cleanReference || cleanReference.startsWith('/') || cleanReference.includes('\\') || /^[a-z][a-z\d+.-]*:/i.test(cleanReference) || cleanReference.startsWith('//')) return null
+  const parts = [...entryPath.split('/').slice(0, -1), ...cleanReference.split('/')]
+  const normalized: string[] = []
+  for (const part of parts) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      if (!normalized.length) return null
+      normalized.pop()
+    } else {
+      normalized.push(part)
+    }
+  }
+  return normalized.join('/') || null
 }
 
 export function buildPreviewDocument(files: EditorFile[], entryPath: string) {
@@ -190,12 +327,14 @@ export function buildPreviewDocument(files: EditorFile[], entryPath: string) {
 
   const byPath = new Map(files.map((file) => [file.path, file.content]))
   let html = entry.content
-  html = html.replace(/<link\b[^>]*?href=["']([^"']+)["'][^>]*>/gi, (tag, path) => {
-    const content = byPath.get(path)
+  html = html.replace(/<link\b[^>]*?href=["']([^"']+)["'][^>]*>/gi, (tag, reference) => {
+    const path = resolveProjectReference(entryPath, reference)
+    const content = path ? byPath.get(path) : undefined
     return content === undefined ? tag : `<style data-lotus-path="${path}">${content}</style>`
   })
-  html = html.replace(/<script\b([^>]*?)src=["']([^"']+)["']([^>]*)><\/script>/gi, (tag, before, path) => {
-    const content = byPath.get(path)
+  html = html.replace(/<script\b[^>]*?src=["']([^"']+)["'][^>]*><\/script>/gi, (tag, reference) => {
+    const path = resolveProjectReference(entryPath, reference)
+    const content = path ? byPath.get(path) : undefined
     return content === undefined ? tag : `<script data-lotus-path="${path}">${content.replace(/<\/script/gi, '<\\/script')}</script>`
   })
   return html
