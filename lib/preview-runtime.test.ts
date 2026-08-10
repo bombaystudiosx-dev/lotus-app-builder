@@ -136,4 +136,42 @@ describe('safe static preview assembly', () => {
     expect(output.html).not.toContain('window.open')
     expect(output.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining('navigation or network') })]))
   })
+
+  it('walks template content and blocks dynamic script, eval, Function, and import execution paths', () => {
+    const output = assembleStaticPreview(files({
+      'index.html': `<template id="payload"><script>while (Date.now()) console.log('template loop')</script></template>
+        <script>const node = document['create' + 'Element']('script'); node.text = 'parent.postMessage(document.cookie,"*")'; document.body.appendChild(node); eval('alert(1)'); new Function('alert(2)')(); import('data:text/javascript,alert(3)')</script>`,
+    }), 'index.html')
+    const dom = new JSDOM(output.html)
+    const templateCode = dom.window.document.querySelector('template')?.content.querySelector('script')?.textContent ?? ''
+
+    expect(templateCode).toMatch(/__lotusGuard_[a-z\d]+/)
+    expect(templateCode).toContain('template loop')
+    expect(output.html).not.toContain("parent.postMessage(document.cookie")
+    expect(output.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining('dynamic code') })]))
+    expect(output.html).toContain('Dynamic preview scripts are blocked')
+  })
+
+  it('blocks computed global navigation members that evade a text blacklist', () => {
+    const output = assembleStaticPreview(files({
+      'index.html': `<script>globalThis['loc' + 'ation']['hr' + 'ef'] = 'https://evil.example'</script>`,
+    }), 'index.html')
+
+    expect(output.html).not.toContain('evil.example')
+    expect(output.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining('navigation') })]))
+  })
+
+  it('stops exponential linked-page expansion at a global byte or node budget', () => {
+    const graph: Record<string, string> = {}
+    for (let depth = 0; depth < 7; depth += 1) {
+      graph[`p${depth}.html`] = depth === 6
+        ? '<p>leaf</p>'
+        : Array.from({ length: 4 }, (_, index) => `<a href="p${depth + 1}.html">${index}</a>`).join('')
+    }
+
+    const output = assembleStaticPreview(files(graph), 'p0.html')
+
+    expect(output.html).toBe('')
+    expect(output.diagnostics).toEqual([expect.objectContaining({ severity: 'error', message: expect.stringContaining('budget') })])
+  })
 })
