@@ -22,6 +22,16 @@ function setup() {
   return createProjectService(database)
 }
 
+function setupWithSqlite() {
+  const sqlite = new Database(':memory:')
+  databases.push(sqlite)
+  migrateDatabase(sqlite)
+  const database = drizzle(sqlite, { schema })
+  const now = new Date()
+  database.insert(schema.user).values({ id: 'user-a', name: 'Ada', email: 'ada@example.com', createdAt: now, updatedAt: now }).run()
+  return { projects: createProjectService(database), sqlite }
+}
+
 describe('normalized project files', () => {
   it('seeds a static starter and retains nested files after reading again', async () => {
     const projects = setup()
@@ -87,5 +97,15 @@ describe('normalized project files', () => {
 
     await expect(projects.createFile('user-a', created.id, { path: 'large/overflow.txt', content: megabyte })).rejects.toThrow('Project size limit exceeded')
     await expect(projects.getFileByPath('user-a', created.id, 'large/overflow.txt')).resolves.toBeNull()
+  })
+
+  it('rejects duplication of a grandfathered oversized file', async () => {
+    const { projects, sqlite } = setupWithSqlite()
+    const created = await projects.createBlank('user-a')
+    const source = await projects.createFile('user-a', created.id, { path: 'source.txt', content: 'small' })
+
+    sqlite.prepare('UPDATE project_file SET content = ?, size = ? WHERE id = ?').run('x'.repeat(1_048_577), 1_048_577, source.id)
+    await expect(projects.duplicateFile('user-a', created.id, source.id, 'copy.txt')).rejects.toThrow('File is too large')
+    await expect(projects.getFileByPath('user-a', created.id, 'copy.txt')).resolves.toBeNull()
   })
 })

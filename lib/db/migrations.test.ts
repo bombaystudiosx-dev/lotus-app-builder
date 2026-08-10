@@ -97,4 +97,57 @@ describe('migrateDatabase', () => {
     expect(database.prepare("PRAGMA foreign_key_list('project')").all()).toEqual([])
     expect(database.pragma('user_version', { simple: true })).toBe(0)
   })
+
+  it('rebuilds child tables after a legacy project rebuild with valid foreign keys and cascades', () => {
+    const database = createLegacyDatabase()
+    database.exec(`
+      INSERT INTO user VALUES ('user-1', 'Lotus', 'lotus@example.com', 0, NULL, 1, 1);
+      INSERT INTO project VALUES ('project-1', 'user-1', 'Existing project', 'html', '{"index.html":"<h1>Keep this</h1>"}', 1, 1);
+    `)
+
+    migrateDatabase(database)
+
+    expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([])
+    expect(database.prepare("PRAGMA foreign_key_list('project_file')").all()).toContainEqual(expect.objectContaining({ from: 'projectId', table: 'project', to: 'id' }))
+    expect(database.prepare("PRAGMA foreign_key_list('project_runtime')").all()).toContainEqual(expect.objectContaining({ from: 'projectId', table: 'project', to: 'id' }))
+    database.prepare("INSERT INTO project_file VALUES ('extra-file', 'project-1', 'extra.js', 'export {}', 'utf-8', 9, NULL, NULL, 2, 2)").run()
+    database.prepare("UPDATE project_runtime SET metadata = '{\"checked\":\"yes\"}' WHERE projectId = 'project-1'").run()
+    database.prepare("DELETE FROM project WHERE id = 'project-1'").run()
+    expect(database.prepare('SELECT count(*) AS count FROM project_file').get()).toEqual({ count: 0 })
+    expect(database.prepare('SELECT count(*) AS count FROM project_runtime').get()).toEqual({ count: 0 })
+  })
+
+  it('retires legacy file JSON atomically so restarts cannot resurrect trashed or deleted files', () => {
+    const database = createLegacyDatabase()
+    database.exec(`
+      INSERT INTO user VALUES ('user-1', 'Lotus', 'lotus@example.com', 0, NULL, 1, 1);
+      INSERT INTO project VALUES ('project-1', 'user-1', 'Existing project', 'html', '{"keep.txt":"one","remove.txt":"two"}', 1, 1);
+    `)
+
+    migrateDatabase(database)
+    database.prepare("UPDATE project_file SET deletedAt = 2 WHERE path = 'keep.txt'").run()
+    database.prepare("DELETE FROM project_file WHERE path = 'remove.txt'").run()
+    migrateDatabase(database)
+
+    expect(database.prepare("SELECT files FROM project WHERE id = 'project-1'").get()).toEqual({ files: '{}' })
+    expect(database.prepare("SELECT path, deletedAt FROM project_file WHERE projectId = 'project-1'").all()).toEqual([{ path: 'keep.txt', deletedAt: 2 }])
+  })
+
+  it('keeps colliding slash and backslash legacy keys as separate normalized records', () => {
+    const database = createLegacyDatabase()
+    database.exec(`
+      INSERT INTO user VALUES ('user-1', 'Lotus', 'lotus@example.com', 0, NULL, 1, 1);
+      INSERT INTO project VALUES ('project-1', 'user-1', 'Existing project', 'html', '{"src\\\\app.js":"backslash","src/app.js":"slash"}', 1, 1);
+    `)
+
+    migrateDatabase(database)
+
+    const files = database.prepare("SELECT path, content, originalPath FROM project_file WHERE projectId = 'project-1' ORDER BY content").all()
+    expect(files).toHaveLength(2)
+    expect(files).toEqual(expect.arrayContaining([
+      expect.objectContaining({ content: 'backslash', originalPath: 'src\\app.js' }),
+      expect.objectContaining({ content: 'slash', originalPath: 'src/app.js' }),
+    ]))
+    expect(new Set((files as Array<{ path: string }>).map((file) => file.path)).size).toBe(2)
+  })
 })
