@@ -219,3 +219,80 @@ Result: PASS (exit 0), 61.8 seconds.
 - No Task 6 work was performed.
 - All changes stayed inside the assigned `lotus-real-product` worktree.
 - No product external API, deployment, push, credential, or third-party mutation was performed.
+
+---
+
+## Fix Round 3 (2026-08-10)
+
+### Outcome
+
+Closed the remaining intrinsic-constructor, navigation-authentication, and pre-allocation expansion gaps. The implementation remains defensive: scripts that request blocked capabilities are removed with diagnostics, dynamic fallbacks are sealed before user code, and failed budget checks return no preview HTML.
+
+### Intrinsic dynamic-code containment
+
+- The Acorn detector now rejects invoked direct or constant-computed `.constructor` paths, including function-expression constructors, `Function.prototype.constructor`, reflective constructor lookup, and `Reflect.construct` targets.
+- The runtime bridge captures ordinary, async, generator, and async-generator function prototypes before replacing the global `Function`, then installs the denying constructor on every captured intrinsic prototype. A dynamically computed constructor key therefore throws without executing its payload.
+- Destructured `location`/`navigation` bindings and `Reflect.get(globalThis, 'location')` aliases are rejected statically. Direct and computed location/navigation members remain covered by the existing alias-aware detector.
+
+### Navigation and dynamic-document containment
+
+- Every assembler-created local page anchor receives a marker only after its local HTML was recursively assembled. Before user scripts run, a randomized one-shot registrar captures the exact anchor object and exact original data URL into an in-closure `WeakMap`.
+- Click navigation no longer trusts a data-URL prefix. The earliest `window` capture listener requires the exact registered node, an unchanged exact URL, and a trusted user event. Mutated, cloned, forged, external, and synthetic links are cancelled before default navigation, and blocked events cannot be preempted by later user capture listeners.
+- User scripts are structurally moved behind the registrar while template scripts remain inert and instrumented in `template.content`. The CSP/error bridge still remains first in the document head.
+- Dynamic `meta` and `link` insertion is denied across node/fragment/HTML insertion APIs. Meta navigation setters and attributes are sealed, programmatic form submission is denied, and submit events are cancelled at the earliest capture point.
+- Safe packaged-page navigation remains available only inside the sandboxed iframe. New-window execution remains intentionally unavailable; **Download Preview** continues to export inert HTML.
+
+### Pre-allocation expansion bounds
+
+- The shared assembly budget now tracks cumulative bytes, nodes, and at most 4,096 expanded references across HTML pages, scripts, stylesheets, CSS URLs, images, fonts, and other packaged assets.
+- Asset data URLs are encoded once per canonical project path and cached. Every use reserves the cached URL's output bytes before attribute/CSS replacement; first use reserves an exact base64-size estimate before encoding or whitespace normalization.
+- Linked-page base64 output remains reserved before encoding. A conservative structural serialization estimate, including worst-case HTML escaping, is reserved before `parse5.serialize`, preventing oversized output from being allocated before the final budget decision.
+- Repeated image and CSS references now fail deterministically at the global reference budget even when their raw markup and eventual byte size would otherwise fit. The earlier exponential linked-page regression remains green.
+
+### Exploit regression evidence
+
+Focused exploit command:
+
+`pnpm exec vitest run lib/preview-runtime.test.ts --reporter=verbose`
+
+Result: PASS, 1 file and 18 tests.
+
+Adjacent integration command:
+
+`pnpm exec vitest run lib/preview-runtime.test.ts components/lotus/live-preview.test.tsx components/lotus/preview-workbench.test.tsx lib/local-bundler.test.ts components/lotus/editor-workspace.test.tsx`
+
+Result: PASS, 5 files and 48 tests.
+
+The added regressions prove:
+
+- function-expression and prototype-chain constructor payloads are rejected statically, while a runtime-computed constructor key throws without setting the payload marker;
+- destructured and reflective location aliases are removed with navigation diagnostics;
+- a dynamically computed refresh meta cannot be inserted or mutated into an active redirect;
+- user-authored data links are rewritten inert, only assembler-created anchors are registered, and a user-mutated registered anchor is cancelled before a later `window` capture listener can run;
+- 2,500 image plus 2,500 CSS references to one cached SVG fail with the deterministic expansion-budget diagnostic before the expanded output is allocated.
+
+### Final verification
+
+Command: `pnpm run verify`
+
+Result: PASS (exit 0), 40.2 seconds.
+
+- TypeScript: PASS, `tsc --noEmit`.
+- ESLint: PASS, no warnings or errors.
+- Tests: PASS, 12 files and 115 tests.
+- Production build: PASS, Next.js 16.3.0 compiled, typechecked, generated all routes, and finalized optimization.
+- Audit: PASS, `No known vulnerabilities found` at the high-severity threshold.
+- Diff hygiene: PASS, `git diff --check` returned no findings before the implementation commits.
+
+### Fix-round commits
+
+- `d2fa3c4` — RED intrinsic-constructor, alias-navigation, structural-link, and expansion-budget regressions.
+- `726f5f0` — GREEN intrinsic/runtime guards, structural local-page authorization, and pre-allocation reference/output budgets.
+- `a4a0c20` — RED capture-listener preemption regression found during security self-review.
+- `1dea0c2` — GREEN earliest-window navigation and submit interception.
+
+### Scope
+
+- No Task 6 work was performed.
+- All changes stayed inside the assigned `lotus-real-product` worktree.
+- No product external API, deployment, push, credential, or third-party mutation was performed.
