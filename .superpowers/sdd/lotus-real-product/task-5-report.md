@@ -399,3 +399,87 @@ Coverage command: `pnpm run test:coverage`
 - No Task 6 work was performed.
 - All changes stayed inside the assigned `lotus-real-product` worktree.
 - No deployment, push, credential change, paid action, or third-party mutation was performed.
+
+---
+
+## Fix Round 5 (2026-08-10)
+
+### Outcome
+
+Closed the final function-parameter reflection bypass and restored benign function-valued DOM handlers without reopening string-handler, dynamic-code, or navigation paths. Static analysis remains fail-closed and explicitly bounded, and the browser bridge installs only handler functions whose source proves it passed through Lotus instrumentation.
+
+### Function-parameter alias containment
+
+- Extended fixed-point alias propagation from variable/assignment bindings to invoked function parameters and function aliases.
+- Recursively handles identifier, object, array, nested, assignment-default, and rest binding patterns. Direct calls, `new`, `.call`, `.apply`, `.bind`, `Reflect.apply`, `Reflect.construct`, array spreads, function aliases, and higher-order destructured callbacks are covered by regressions.
+- Parameter analysis is capped at 32 recursive binding levels and 8,192 binding steps per pass, in addition to the existing 64-pass alias cap. Exhausting any bound fails closed and removes the script.
+- Default initializers are considered when the supplied value may be `undefined`, while definitely supplied object/function values avoid a needless false positive. A benign defaulted `{ get }` parameter remains available when the caller provides a safe local accessor.
+
+### Safe function-valued handlers
+
+- Replaced the Round 4 blanket non-null handler rejection with a validator based on the bridge-captured native `Function.prototype.toString`.
+- A handler is installed through the captured native setter only when it is a function and its body begins with a randomized `__lotusGuard_*()` call injected by `instrumentJavaScript`. This ties accepted handler bodies to nonce-authorized, AST-validated, execution-budgeted project scripts.
+- String values and `on*` attributes remain blocked through direct, namespaced, attribute-node, named-map, HTML-sink, and mutation-observer paths. Descriptor/getter/setter replacement routes remain denied.
+- `window.onerror` remains bridge-owned so a project handler cannot suppress Lotus runtime diagnostics. AST navigation detection still removes a function handler whose body attempts `location` navigation before Chrome can execute it.
+
+### Exploit regression evidence
+
+RED command:
+
+`pnpm exec vitest run lib/preview-runtime.test.ts lib/preview-runtime.browser.test.ts --reporter=verbose`
+
+Initial result: expected failure, 3 failing and 21 passing tests. The unit suite retained direct parameter reflection source, Chrome navigated to `about:blank#reflect-parameter-escaped`, and the blanket handler setter aborted the benign script before assignment or click-tail statements ran.
+
+GREEN focused command:
+
+`pnpm exec vitest run lib/preview-runtime.test.ts lib/preview-runtime.browser.test.ts components/lotus/live-preview.test.tsx lib/local-bundler.test.ts components/lotus/preview-workbench.test.tsx components/lotus/editor-workspace.test.tsx --reporter=verbose`
+
+Result: PASS, 6 files and 55 tests.
+
+The bounded regressions prove:
+
+- `Reflect.get` and `Object.getOwnPropertyDescriptor` cannot cross direct, renamed, nested, defaulted, rest, call/apply/bind/construct/spread, callback, or higher-order parameter bindings to recover navigation objects;
+- a benign defaulted parameter using a caller-supplied local `get` function is retained;
+- an instrumented `button.onclick` function runs, its trailing handler statement runs, and statements following assignment and click also run;
+- direct and namespaced string handlers remain absent and non-executable;
+- a function handler containing `globalThis.location.href` is removed with a navigation diagnostic before Chrome execution;
+- the React/Vite starter still bundles and mounts with the stricter handler provenance check.
+
+### Final verification
+
+Command: `pnpm run verify`
+
+Result: PASS (exit 0), 56.4 seconds.
+
+- TypeScript: PASS, `tsc --noEmit`.
+- ESLint: PASS, no warnings or errors.
+- Tests: PASS, 13 files and 122 tests, including 3 real-Chrome security regressions.
+- Production build: PASS, Next.js 16.3.0 compiled, typechecked, collected page data, and generated all routes.
+- Audit: PASS, `No known vulnerabilities found` at the high-severity threshold.
+- Secret scan: PASS for the Fix Round 5 committed diff; zero credential-pattern matches.
+- Diff hygiene: PASS, `git diff --check b3118bd..HEAD` returned no findings.
+
+Coverage command: `pnpm run test:coverage`
+
+- All 122 tests passed.
+- `lib/preview-runtime.ts`: 88.5% statements, 78.78% branches, 97.61% functions, 94.32% lines.
+- `lib/runtime-guard.ts`: 84.09% statements, 76.01% branches, 90.56% functions, 93.76% lines.
+- Repository aggregate: 78% statements, 70.92% branches, 78.09% functions, 84.71% lines. Both Fix Round 5 production modules exceed 80% statement coverage; the repository has no global threshold.
+
+### Security self-review
+
+- Expanded the original reproducer matrix during implementation to cover bound, constructed, spread, callback, and higher-order delivery rather than only the two reported IIFE forms.
+- Corrected object-expression property resolution and alias-state updates found during diff review, then reran focused tests, typecheck, lint, full verification, and coverage.
+- Confirmed safe handler acceptance cannot authorize string code, native/bound functions, or uninstrumented function source; runtime dynamic function creation remains sealed before project scripts execute.
+- The optional `eslint-plugin-security` probe was unavailable because that plugin is not a project dependency. No dependency was added for this fix; the configured ESLint suite, high-severity audit, targeted Chrome exploit suite, manual diff review, and diff-only secret scan all passed.
+
+### Fix-round commits
+
+- `24f4fe2` — RED function-parameter alias and benign-handler browser regressions.
+- `b552ef6` — GREEN bounded parameter binding analysis and instrumented function-handler support.
+
+### Scope
+
+- No Task 6 work was performed.
+- All changes stayed inside the assigned `lotus-real-product` worktree.
+- No deployment, push, credential change, paid action, or third-party mutation was performed.
