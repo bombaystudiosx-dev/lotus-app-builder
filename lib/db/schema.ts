@@ -27,8 +27,18 @@ export const verification = sqliteTable('verification', {
 export const project = sqliteTable('project', {
   id: text('id').primaryKey(), userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }), name: text('name').notNull().default('Untitled'),
   mode: text('mode').notNull().default('html'), files: text('files', { mode: 'json' }).$type<Record<string, string>>().notNull().default({}),
+  status: text('status', { enum: ['active', 'archived', 'trashed'] }).notNull().default('active'),
+  archivedAt: integer('archivedAt', { mode: 'timestamp' }), deletedAt: integer('deletedAt', { mode: 'timestamp' }),
   createdAt: timestamp('createdAt'), updatedAt: timestamp('updatedAt'),
 }, (table) => [index('project_user_updated_at_idx').on(table.userId, table.updatedAt)])
+export const userSettings = sqliteTable('user_settings', {
+  userId: text('userId').primaryKey().references(() => user.id, { onDelete: 'cascade' }),
+  theme: text('theme', { enum: ['system', 'light', 'dark'] }).notNull().default('system'),
+  editorFontSize: integer('editorFontSize').notNull().default(14),
+  autosaveInterval: integer('autosaveInterval').notNull().default(30),
+  defaultDevice: text('defaultDevice', { enum: ['phone', 'tablet', 'desktop'] }).notNull().default('phone'),
+  createdAt: timestamp('createdAt'), updatedAt: timestamp('updatedAt'),
+})
 export const message = sqliteTable('message', {
   id: text('id').primaryKey(), projectId: text('projectId').notNull().references(() => project.id, { onDelete: 'cascade' }), userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }),
   role: text('role').notNull(), content: text('content').notNull(), createdAt: timestamp('createdAt'),
@@ -39,4 +49,5 @@ export const message = sqliteTable('message', {
 
 export type Project = typeof project.$inferSelect
 export type Message = typeof message.$inferSelect
+export type UserSettings = typeof userSettings.$inferSelect
 export type ProjectFiles = Record<string, string>

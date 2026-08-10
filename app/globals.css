@@ -90,6 +90,29 @@
   --sidebar-ring: rgba(139, 111, 71, 0.4);
 }
 
+.dark {
+  color-scheme: dark;
+  --background: #17120c;
+  --foreground: #f8edd5;
+  --card: #231b12;
+  --card-foreground: #f8edd5;
+  --popover: #2a2015;
+  --popover-foreground: #f8edd5;
+  --primary: #f5dfad;
+  --primary-foreground: #261805;
+  --secondary: #352716;
+  --secondary-foreground: #f8edd5;
+  --muted: #332717;
+  --muted-foreground: #c7b38e;
+  --accent: #e7b654;
+  --accent-foreground: #261805;
+  --destructive: #f08072;
+  --destructive-foreground: #30100d;
+  --border: rgba(248, 237, 213, 0.16);
+  --input-background: #2c2217;
+  --ring: rgba(231, 182, 84, 0.55);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

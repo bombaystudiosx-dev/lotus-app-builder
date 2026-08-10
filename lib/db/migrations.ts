@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 
 const CREATE_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS user (
@@ -27,7 +27,14 @@ const CREATE_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS project (
     id TEXT PRIMARY KEY, userId TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
     name TEXT NOT NULL DEFAULT 'Untitled', mode TEXT NOT NULL DEFAULT 'html',
-    files TEXT NOT NULL DEFAULT '{}', createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
+    files TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'active', archivedAt INTEGER, deletedAt INTEGER,
+    createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS user_settings (
+    userId TEXT PRIMARY KEY REFERENCES user(id) ON DELETE CASCADE,
+    theme TEXT NOT NULL DEFAULT 'system', editorFontSize INTEGER NOT NULL DEFAULT 14,
+    autosaveInterval INTEGER NOT NULL DEFAULT 30, defaultDevice TEXT NOT NULL DEFAULT 'phone',
+    createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
   );
   CREATE TABLE IF NOT EXISTS message (
     id TEXT PRIMARY KEY, projectId TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
@@ -41,6 +48,7 @@ const CREATE_INDEXES_SQL = `
   CREATE INDEX IF NOT EXISTS session_user_id_idx ON session(userId);
   CREATE INDEX IF NOT EXISTS verification_identifier_idx ON verification(identifier);
   CREATE INDEX IF NOT EXISTS project_user_updated_at_idx ON project(userId, updatedAt);
+  CREATE INDEX IF NOT EXISTS project_user_status_updated_at_idx ON project(userId, status, updatedAt);
   CREATE INDEX IF NOT EXISTS message_project_created_at_idx ON message(projectId, createdAt);
   CREATE INDEX IF NOT EXISTS message_user_created_at_idx ON message(userId, createdAt);
 `
@@ -49,6 +57,20 @@ function tableExists(sqlite: Database.Database, table: string) {
   return Boolean(
     sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table),
   )
+}
+
+function columnExists(sqlite: Database.Database, table: string, column: string) {
+  return (sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
+    .some((entry) => entry.name === column)
+}
+
+function upgradeProjectLifecycleColumns(sqlite: Database.Database) {
+  if (!tableExists(sqlite, 'project')) return
+  if (!columnExists(sqlite, 'project', 'status')) {
+    sqlite.exec("ALTER TABLE project ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+  }
+  if (!columnExists(sqlite, 'project', 'archivedAt')) sqlite.exec('ALTER TABLE project ADD COLUMN archivedAt INTEGER')
+  if (!columnExists(sqlite, 'project', 'deletedAt')) sqlite.exec('ALTER TABLE project ADD COLUMN deletedAt INTEGER')
 }
 
 function hasForeignKey(sqlite: Database.Database, table: string, from: string, target: string) {
@@ -70,15 +92,21 @@ function assertNoOrphans(sqlite: Database.Database, table: string, column: strin
 function rebuildProjectTable(sqlite: Database.Database) {
   if (!tableExists(sqlite, 'project') || hasForeignKey(sqlite, 'project', 'userId', 'user')) return
   assertNoOrphans(sqlite, 'project', 'userId', 'user')
+  const legacyStatus = columnExists(sqlite, 'project', 'status') ? "COALESCE(status, 'active')" : "'active'"
+  const legacyArchivedAt = columnExists(sqlite, 'project', 'archivedAt') ? 'archivedAt' : 'NULL'
+  const legacyDeletedAt = columnExists(sqlite, 'project', 'deletedAt') ? 'deletedAt' : 'NULL'
   sqlite.exec(`
     ALTER TABLE project RENAME TO project_legacy;
     CREATE TABLE project (
       id TEXT PRIMARY KEY, userId TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
       name TEXT NOT NULL DEFAULT 'Untitled', mode TEXT NOT NULL DEFAULT 'html',
-      files TEXT NOT NULL DEFAULT '{}', createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
+      files TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'active', archivedAt INTEGER, deletedAt INTEGER,
+      createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
     );
-    INSERT INTO project (id, userId, name, mode, files, createdAt, updatedAt)
-      SELECT id, userId, name, mode, files, createdAt, updatedAt FROM project_legacy;
+    INSERT INTO project (id, userId, name, mode, files, status, archivedAt, deletedAt, createdAt, updatedAt)
+      SELECT id, userId, name, mode, files,
+        ${legacyStatus}, ${legacyArchivedAt}, ${legacyDeletedAt},
+        createdAt, updatedAt FROM project_legacy;
     DROP TABLE project_legacy;
   `)
 }
@@ -107,6 +135,7 @@ export function migrateDatabase(sqlite: Database.Database) {
     sqlite.transaction(() => {
       sqlite.exec(CREATE_TABLES_SQL)
       rebuildProjectTable(sqlite)
+      upgradeProjectLifecycleColumns(sqlite)
       rebuildMessageTable(sqlite)
       sqlite.exec(CREATE_INDEXES_SQL)
       sqlite.pragma(`user_version = ${SCHEMA_VERSION}`)

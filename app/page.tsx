@@ -1,26 +1,20 @@
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
 import { auth } from '@/lib/auth'
-import { getWorkspace } from '@/app/actions/projects'
-import LotusBuilder from '@/components/lotus/builder'
+import { getProjectDashboard } from '@/app/actions/projects'
+import { ProjectDashboard } from '@/components/lotus/project-dashboard'
 
 export default async function Page() {
   const session = await auth.api.getSession({ headers: await headers() })
   if (!session?.user) redirect('/sign-in')
 
-  const ws = await getWorkspace()
+  const dashboard = await getProjectDashboard()
 
   return (
-    <main className="h-svh w-full overflow-hidden">
-      <LotusBuilder
-        initial={{
-          projectId: ws.projectId,
-          name: ws.name,
-          html: ws.html,
-          messages: ws.messages,
-          userName: session.user.name || session.user.email || 'You',
-        }}
-      />
-    </main>
+    <ProjectDashboard
+      initialProjects={dashboard.projects}
+      initialSettings={dashboard.settings}
+      userName={session.user.name || session.user.email || 'You'}
+    />
   )
 }

@@ -226,7 +226,7 @@ function EmptyPreview() {
 }
 
 // ─── Code panel ───────────────────────────────────────────────────────────────
-function CodePanel({ html }: { html: string | null }) {
+function CodePanel({ html, fontSize }: { html: string | null; fontSize: number }) {
   const files = html ? [{ name:"index.html", lang:"html", code: html }] : [];
   const [activeFile, setActiveFile] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -285,7 +285,7 @@ function CodePanel({ html }: { html: string | null }) {
         </div>
         {/* Code */}
         <div className="flex-1 overflow-auto p-5" style={{ background:"var(--background)", scrollbarWidth:"none" }}>
-          <pre style={{ margin:0, fontFamily:"DM Mono,monospace", fontSize:12, lineHeight:1.7, color:"var(--foreground)", whiteSpace:"pre-wrap" }}>
+          <pre style={{ margin:0, fontFamily:"DM Mono,monospace", fontSize, lineHeight:1.7, color:"var(--foreground)", whiteSpace:"pre-wrap" }}>
             {file.code}
           </pre>
         </div>
@@ -524,6 +524,8 @@ interface LotusBuilderProps {
     html: string | null;
     messages: WorkspaceMessage[];
     userName: string;
+    editorFontSize: number;
+    defaultDevice: DeviceMode;
   };
 }
 
@@ -540,7 +542,7 @@ export default function App({ initial }: LotusBuilderProps) {
   const [generatedHtml, setGeneratedHtml] = useState<string | null>(initial.html);
   const [input,     setInput]     = useState("");
   const [isTyping,  setIsTyping]  = useState(false);
-  const [device,    setDevice]    = useState<DeviceMode>("phone");
+  const [device,    setDevice]    = useState<DeviceMode>(initial.defaultDevice);
   const [view,      setView]      = useState<BuildView>("preview");
 
   // Data
@@ -1002,7 +1004,7 @@ export default function App({ initial }: LotusBuilderProps) {
             </div>
           )}
 
-          {view==="code" && <CodePanel html={generatedHtml}/>}
+          {view==="code" && <CodePanel html={generatedHtml} fontSize={initial.editorFontSize}/>}
           {view==="deployed" && <DeployedPanel html={generatedHtml} projectName={projectName}/>}
 
           {/* Active build context bar */}

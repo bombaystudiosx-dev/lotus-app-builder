@@ -43,6 +43,14 @@ describe('migrateDatabase', () => {
     expect(database.prepare("PRAGMA index_list('message')").all()).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: 'message_project_created_at_idx' })]),
     )
+    expect(database.prepare("PRAGMA table_info('project')").all()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'status' }),
+        expect.objectContaining({ name: 'archivedAt' }),
+        expect.objectContaining({ name: 'deletedAt' }),
+      ]),
+    )
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'user_settings'").get()).toBeTruthy()
   })
 
   it('can run repeatedly without changing the schema version', () => {
@@ -66,6 +74,7 @@ describe('migrateDatabase', () => {
     migrateDatabase(database)
 
     expect(database.prepare("SELECT name FROM project WHERE id = 'project-1'").get()).toEqual({ name: 'Existing project' })
+    expect(database.prepare("SELECT status, archivedAt, deletedAt FROM project WHERE id = 'project-1'").get()).toEqual({ status: 'active', archivedAt: null, deletedAt: null })
     expect(database.prepare("SELECT content FROM message WHERE id = 'message-1'").get()).toEqual({ content: 'Keep this' })
     database.prepare("DELETE FROM user WHERE id = 'user-1'").run()
     expect(database.prepare('SELECT count(*) AS count FROM project').get()).toEqual({ count: 0 })

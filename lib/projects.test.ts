@@ -78,6 +78,24 @@ describe('project lifecycle service', () => {
     await expect(projects.permanentlyDelete('user-a', created.id)).resolves.toBeUndefined()
   })
 
+  it('protects trashed projects and validates every preference boundary', async () => {
+    const projects = setup()
+    const created = await projects.createBlank('user-a', 'x'.repeat(101))
+      .catch((error: unknown) => error)
+
+    expect(created).toBeInstanceOf(ProjectLifecycleError)
+    const project = await projects.createBlank('user-a', 'Keep safe')
+    await projects.softDelete('user-a', project.id)
+    await expect(projects.rename('user-a', project.id, 'Nope')).rejects.toThrow('cannot be renamed')
+    await expect(projects.duplicate('user-a', project.id)).rejects.toThrow('cannot be duplicated')
+    await expect(projects.softDelete('user-a', project.id)).rejects.toThrow('already in trash')
+    await expect(projects.updateSettings('user-a', { theme: 'invalid' as 'system' })).rejects.toThrow('Theme is invalid')
+    await expect(projects.updateSettings('user-a', { defaultDevice: 'watch' as 'phone' })).rejects.toThrow('Default device is invalid')
+    await expect(projects.updateSettings('user-a', { editorFontSize: 11 })).rejects.toThrow('Editor font size')
+    await expect(projects.updateSettings('user-a', { autosaveInterval: 4 })).rejects.toThrow('Autosave interval')
+    await expect(projects.updateSettings('user-a', { autosaveInterval: 5.5 })).rejects.toThrow('Autosave interval')
+  })
+
   it('persists validated per-user settings independently', async () => {
     const projects = setup()
 

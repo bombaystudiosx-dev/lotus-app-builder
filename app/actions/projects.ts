@@ -3,10 +3,12 @@
 import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { project, message } from '@/lib/db/schema'
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import { headers } from 'next/headers'
+import { revalidatePath } from 'next/cache'
 import { generateText } from 'ai'
 import { redactSensitiveValues } from '@/lib/safety'
+import { createProjectService } from '@/lib/projects'
 
 async function getUserId() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -16,6 +18,75 @@ async function getUserId() {
 
 function id() {
   return crypto.randomUUID()
+}
+
+const projects = createProjectService(db)
+
+function refreshProjectViews(projectId?: string) {
+  revalidatePath('/')
+  if (projectId) revalidatePath(`/projects/${projectId}`)
+}
+
+export async function getProjectDashboard() {
+  const userId = await getUserId()
+  const [items, settings] = await Promise.all([projects.list(userId), projects.getSettings(userId)])
+  return { projects: items, settings }
+}
+
+export async function getUserSettings() {
+  return projects.getSettings(await getUserId())
+}
+
+export async function createBlankProjectAction(name?: string) {
+  const created = await projects.createBlank(await getUserId(), name)
+  refreshProjectViews(created.id)
+  return created
+}
+
+export async function renameProjectAction(projectId: string, name: string) {
+  const updated = await projects.rename(await getUserId(), projectId, name)
+  refreshProjectViews(projectId)
+  return updated
+}
+
+export async function duplicateProjectAction(projectId: string) {
+  const duplicate = await projects.duplicate(await getUserId(), projectId)
+  refreshProjectViews(duplicate.id)
+  return duplicate
+}
+
+export async function archiveProjectAction(projectId: string) {
+  const updated = await projects.archive(await getUserId(), projectId)
+  refreshProjectViews(projectId)
+  return updated
+}
+
+export async function restoreProjectAction(projectId: string) {
+  const updated = await projects.restore(await getUserId(), projectId)
+  refreshProjectViews(projectId)
+  return updated
+}
+
+export async function softDeleteProjectAction(projectId: string) {
+  const updated = await projects.softDelete(await getUserId(), projectId)
+  refreshProjectViews(projectId)
+  return updated
+}
+
+export async function permanentlyDeleteProjectAction(projectId: string) {
+  await projects.permanentlyDelete(await getUserId(), projectId)
+  refreshProjectViews(projectId)
+}
+
+export async function updateSettingsAction(input: {
+  theme?: 'system' | 'light' | 'dark'
+  editorFontSize?: number
+  autosaveInterval?: number
+  defaultDevice?: 'phone' | 'tablet' | 'desktop'
+}) {
+  const updated = await projects.updateSettings(await getUserId(), input)
+  refreshProjectViews()
+  return updated
 }
 
 // Friendly model labels from the Lotus UI -> AI Gateway model ids.
@@ -59,18 +130,10 @@ export interface Workspace {
   messages: WorkspaceMessage[]
 }
 
-export async function getWorkspace(): Promise<Workspace> {
+export async function getWorkspace(projectId: string): Promise<Workspace | null> {
   const userId = await getUserId()
-  const [proj] = await db
-    .select()
-    .from(project)
-    .where(eq(project.userId, userId))
-    .orderBy(desc(project.updatedAt))
-    .limit(1)
-
-  if (!proj) {
-    return { projectId: null, name: 'Untitled', html: null, messages: [] }
-  }
+  const proj = await projects.get(userId, projectId)
+  if (!proj || proj.status === 'trashed') return null
 
   const rows = await db
     .select()
