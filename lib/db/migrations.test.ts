@@ -31,6 +31,8 @@ describe('migrateDatabase', () => {
     migrateDatabase(database)
 
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project'").get()).toBeTruthy()
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project_file'").get()).toBeTruthy()
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project_runtime'").get()).toBeTruthy()
     expect(database.prepare("PRAGMA foreign_key_list('project')").all()).toContainEqual(
       expect.objectContaining({ from: 'userId', table: 'user', to: 'id' }),
     )
@@ -67,7 +69,7 @@ describe('migrateDatabase', () => {
     const database = createLegacyDatabase()
     database.exec(`
       INSERT INTO user VALUES ('user-1', 'Lotus', 'lotus@example.com', 0, NULL, 1, 1);
-      INSERT INTO project VALUES ('project-1', 'user-1', 'Existing project', 'html', '{}', 1, 1);
+      INSERT INTO project VALUES ('project-1', 'user-1', 'Existing project', 'html', '{"index.html":"<h1>Keep this</h1>","src/app.js":"console.log(1)"}', 1, 1);
       INSERT INTO message VALUES ('message-1', 'project-1', 'user-1', 'user', 'Keep this', 1);
     `)
 
@@ -76,6 +78,11 @@ describe('migrateDatabase', () => {
     expect(database.prepare("SELECT name FROM project WHERE id = 'project-1'").get()).toEqual({ name: 'Existing project' })
     expect(database.prepare("SELECT status, archivedAt, deletedAt FROM project WHERE id = 'project-1'").get()).toEqual({ status: 'active', archivedAt: null, deletedAt: null })
     expect(database.prepare("SELECT content FROM message WHERE id = 'message-1'").get()).toEqual({ content: 'Keep this' })
+    expect(database.prepare("SELECT path, content, encoding FROM project_file WHERE projectId = 'project-1' ORDER BY path").all()).toEqual([
+      { path: 'index.html', content: '<h1>Keep this</h1>', encoding: 'utf-8' },
+      { path: 'src/app.js', content: 'console.log(1)', encoding: 'utf-8' },
+    ])
+    expect(database.prepare("SELECT runtime, entryPath FROM project_runtime WHERE projectId = 'project-1'").get()).toEqual({ runtime: 'static', entryPath: 'index.html' })
     database.prepare("DELETE FROM user WHERE id = 'user-1'").run()
     expect(database.prepare('SELECT count(*) AS count FROM project').get()).toEqual({ count: 0 })
     expect(database.prepare('SELECT count(*) AS count FROM message').get()).toEqual({ count: 0 })
