@@ -66,6 +66,7 @@ describe('safe preview browser containment', () => {
       await page.setContent(output.html, { waitUntil: 'load' })
       const dom = new JSDOM(await serializedPage(page))
       const state = {
+        handlerProbeComplete: dom.window.document.body.dataset.handlerProbeComplete,
         attributeExecuted: dom.window.document.body.dataset.attributeExecuted,
         namespacedExecuted: dom.window.document.body.dataset.namespacedExecuted,
         propertyExecuted: dom.window.document.body.dataset.propertyExecuted,
@@ -76,6 +77,7 @@ describe('safe preview browser containment', () => {
       }
 
       expect(state).toEqual({
+        handlerProbeComplete: 'true',
         attributeExecuted: undefined,
         namespacedExecuted: undefined,
         propertyExecuted: undefined,
@@ -92,7 +94,7 @@ describe('safe preview browser containment', () => {
   it('keeps benign metas from becoming refresh directives through DOM mutation APIs', async () => {
     const output = assembleStaticPreview(files({
       'index.html': `<meta id="namespace" name="description" content="safe"><meta id="attribute-node" name="description" content="safe"><meta id="named-map" name="description" content="safe"><meta id="attribute-value" http-equiv="x-lotus" content="safe"><script>
-        const target = '3600;url=https://evil.example/refresh';
+        const target = '0;url=about:blank#refresh-escaped';
         try { const meta = document.getElementById('namespace'); meta.setAttributeNS(null, 'http-equiv', 'refresh'); meta.setAttributeNS(null, 'content', target) } catch (_) {}
         try { const meta = document.getElementById('attribute-node'); const mode = document.createAttribute('http-equiv'); mode.value = 'refresh'; const content = document.createAttribute('content'); content.value = target; meta.setAttributeNode(mode); meta.setAttributeNode(content) } catch (_) {}
         try { const attributes = document.getElementById('named-map').attributes; const mode = document.createAttribute('http-equiv'); mode.value = 'refresh'; const content = document.createAttribute('content'); content.value = target; attributes.setNamedItem(mode); attributes.setNamedItem(content) } catch (_) {}
@@ -104,6 +106,8 @@ describe('safe preview browser containment', () => {
     try {
       await page.setContent(output.html, { waitUntil: 'load' })
       const dom = new JSDOM(await serializedPage(page))
+      expect(dom.window.document.body.dataset.metaProbeComplete).toBe('true')
+      expect(page.url()).not.toContain('refresh-escaped')
       const refreshMetas = [...dom.window.document.querySelectorAll('meta[http-equiv]')]
         .filter((meta) => meta.getAttribute('http-equiv')?.trim().toLowerCase() === 'refresh')
         .map((meta) => meta.id)

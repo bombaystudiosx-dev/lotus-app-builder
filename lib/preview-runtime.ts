@@ -12,7 +12,6 @@ type HtmlAttribute = { name: string; value: string }
 type HtmlNode = { nodeName: string; tagName?: string; value?: string; attrs?: HtmlAttribute[]; childNodes?: HtmlNode[]; parentNode?: HtmlNode; content?: HtmlNode }
 type AssemblyBudget = { bytes: number; nodes: number; references: number; queryWarnings: Set<string>; assetCache: Map<string, string> }
 
-const PREVIEW_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:; connect-src 'none'; media-src data:; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
 const EXTERNAL_REFERENCE = /^(?:[a-z][a-z\d+.-]*:|\/\/)/i
 const IMAGE_MIME: Record<string, string> = { svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', ico: 'image/x-icon', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf' }
 const MAX_EXPANDED_BYTES = 5_242_880
@@ -116,15 +115,26 @@ function randomRegistryName() {
   return `__lotusRegister_${values[0].toString(36)}${values[1].toString(36)}`
 }
 
-function runtimeBridge(registryName: string) {
-  return `<script data-lotus-runtime>(function(){
+function randomScriptNonce() {
+  const values = new Uint32Array(4)
+  globalThis.crypto.getRandomValues(values)
+  return Array.from(values, (value) => value.toString(16).padStart(8, '0')).join('')
+}
+
+function previewCsp(scriptNonce: string) {
+  return `default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'nonce-${scriptNonce}'; font-src data:; connect-src 'none'; media-src data:; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`
+}
+
+function runtimeBridge(registryName: string, scriptNonce: string) {
+  return `<script data-lotus-runtime nonce="${scriptNonce}">(function(){
 var sent=0,windowStart=Date.now(),localPages=new WeakMap(),registered=false;
+var nativeDefineProperty=Object.defineProperty,nativeDefineProperties=Object.defineProperties,nativeReflectDefineProperty=Reflect.defineProperty,nativeGetOwnPropertyDescriptor=Object.getOwnPropertyDescriptor,nativeGetOwnPropertyNames=Object.getOwnPropertyNames,nativeGetPrototypeOf=Object.getPrototypeOf,nativeFunctionToString=Function.prototype.toString;
 var randomValues=new Uint32Array(2);crypto.getRandomValues(randomValues);var channel=randomValues[0].toString(36).padStart(7,'0')+randomValues[1].toString(36).padStart(7,'0'),post=parent.postMessage.bind(parent);
 var clean=function(value){var text='';try{text=typeof value==='string'?value:JSON.stringify(value)}catch(_){text=String(value)}return text.slice(0,1000)};
 var send=function(kind,payload){var now=Date.now();if(now-windowStart>1000){sent=0;windowStart=now}if(sent++>=40)return;post({type:'lotus-preview-event',channel:channel,kind:kind,payload:payload},'*')};
 var deny=function(){throw new Error('Dynamic preview scripts are blocked')};
-var define=function(target,name,value){try{Object.defineProperty(target,name,{value:value,writable:false,configurable:false})}catch(_){try{target[name]=value}catch(__){}}};
-var constructorPrototypes=[Function.prototype];try{constructorPrototypes.push(Object.getPrototypeOf(async function(){}),Object.getPrototypeOf(function*(){}),Object.getPrototypeOf(async function*(){}))}catch(_){}
+var define=function(target,name,value){try{nativeDefineProperty(target,name,{value:value,writable:false,configurable:false})}catch(_){try{target[name]=value}catch(__){}}};
+var constructorPrototypes=[Function.prototype];try{constructorPrototypes.push(nativeGetPrototypeOf(async function(){}),nativeGetPrototypeOf(function*(){}),nativeGetPrototypeOf(async function*(){}))}catch(_){}
 ['open','fetch','XMLHttpRequest','WebSocket','EventSource','Worker','SharedWorker','eval','Function'].forEach(function(name){define(window,name,deny)});
 constructorPrototypes.forEach(function(prototype){define(prototype,'constructor',deny)});
 if(window.navigation)define(window.navigation,'navigate',deny);
@@ -133,47 +143,78 @@ var nativeCreate=document.createElement.bind(document),nativeCreateNS=document.c
 define(Document.prototype,'createElement',function(name){if(String(name).toLowerCase()==='script')return deny();return nativeCreate.apply(document,arguments)});
 define(Document.prototype,'createElementNS',function(namespace,name){if(String(name).toLowerCase()==='script')return deny();return nativeCreateNS.apply(document,arguments)});
 var active=function(node){return !!node&&(['script','iframe','frame','object','embed','portal','meta','link'].indexOf(String(node.nodeName).toLowerCase())>=0||!!(node.querySelector&&node.querySelector('script,iframe,frame,object,embed,portal,meta,link')))};
+var nativeRemoveChild=Node.prototype.removeChild;
 ['appendChild','insertBefore','replaceChild'].forEach(function(name){var original=Node.prototype[name];define(Node.prototype,name,function(node){if(active(node))return deny();return original.apply(this,arguments)})});
 var protectMany=function(proto,name){if(!proto||typeof proto[name]!=='function')return;var original=proto[name];define(proto,name,function(){for(var index=0;index<arguments.length;index++){if(active(arguments[index]))return deny()}return original.apply(this,arguments)})};
 [Element.prototype,Document.prototype,DocumentFragment.prototype,typeof ShadowRoot==='undefined'?null:ShadowRoot.prototype].forEach(function(proto){['append','prepend','replaceChildren'].forEach(function(name){protectMany(proto,name)})});
 [Element.prototype,typeof CharacterData==='undefined'?null:CharacterData.prototype].forEach(function(proto){['before','after','replaceWith'].forEach(function(name){protectMany(proto,name)})});
 if(typeof Range!=='undefined'&&Range.prototype.insertNode){var nativeInsertNode=Range.prototype.insertNode;define(Range.prototype,'insertNode',function(node){if(active(node))return deny();return nativeInsertNode.apply(this,arguments)})}
-var htmlDescriptor=Object.getOwnPropertyDescriptor(Element.prototype,'innerHTML'),outerDescriptor=Object.getOwnPropertyDescriptor(Element.prototype,'outerHTML');
+var htmlDescriptor=nativeGetOwnPropertyDescriptor(Element.prototype,'innerHTML'),outerDescriptor=nativeGetOwnPropertyDescriptor(Element.prototype,'outerHTML');
 var sanitize=function(markup){var template=nativeCreate('template');htmlDescriptor.set.call(template,String(markup));template.content.querySelectorAll('script,iframe,frame,object,embed,portal,meta,link').forEach(function(node){node.remove()});template.content.querySelectorAll('*').forEach(function(node){Array.prototype.slice.call(node.attributes).forEach(function(attribute){var name=attribute.name.toLowerCase();if(name.indexOf('on')===0||['srcdoc','formaction','ping','action','target'].indexOf(name)>=0)node.removeAttribute(attribute.name)})});return htmlDescriptor.get.call(template)};
-if(htmlDescriptor&&htmlDescriptor.get&&htmlDescriptor.set)Object.defineProperty(Element.prototype,'innerHTML',{get:htmlDescriptor.get,set:function(value){return htmlDescriptor.set.call(this,sanitize(value))},configurable:false});
-if(outerDescriptor&&outerDescriptor.get&&outerDescriptor.set)Object.defineProperty(Element.prototype,'outerHTML',{get:outerDescriptor.get,set:function(value){return outerDescriptor.set.call(this,sanitize(value))},configurable:false});
+if(htmlDescriptor&&htmlDescriptor.get&&htmlDescriptor.set)nativeDefineProperty(Element.prototype,'innerHTML',{get:htmlDescriptor.get,set:function(value){return htmlDescriptor.set.call(this,sanitize(value))},configurable:false});
+if(outerDescriptor&&outerDescriptor.get&&outerDescriptor.set)nativeDefineProperty(Element.prototype,'outerHTML',{get:outerDescriptor.get,set:function(value){return outerDescriptor.set.call(this,sanitize(value))},configurable:false});
 if(Element.prototype.insertAdjacentHTML){var nativeAdjacent=Element.prototype.insertAdjacentHTML;define(Element.prototype,'insertAdjacentHTML',function(position,value){return nativeAdjacent.call(this,position,sanitize(value))})}
-var nativeSetAttribute=Element.prototype.setAttribute;define(Element.prototype,'setAttribute',function(name){var tag=String(this.nodeName).toLowerCase(),field=String(name).toLowerCase();if(tag==='meta'&&['http-equiv','content'].indexOf(field)>=0||tag==='link'&&['href','rel'].indexOf(field)>=0)return deny();return nativeSetAttribute.apply(this,arguments)});
-var protectSetter=function(prototype,name){if(!prototype)return;var descriptor=Object.getOwnPropertyDescriptor(prototype,name);if(descriptor&&descriptor.get&&descriptor.set)try{Object.defineProperty(prototype,name,{get:descriptor.get,set:deny,enumerable:descriptor.enumerable,configurable:false})}catch(_){}};
+var eventField=function(name){return /^on[a-z]/i.test(String(name).split(':').pop()||'')},sensitiveElement=function(element){var tag=String(element&&element.nodeName).toLowerCase();return tag==='meta'||tag==='link'},sensitiveMaps=new WeakSet();
+var sensitiveAttribute=function(attribute){return !!attribute&&(eventField(attribute.name)||sensitiveElement(attribute.ownerElement))};
+var rememberSensitive=function(root){if(!root)return;var nodes=[];if(sensitiveElement(root))nodes.push(root);if(root.querySelectorAll)nodes=nodes.concat(Array.prototype.slice.call(root.querySelectorAll('meta,link')));nodes.forEach(function(node){sensitiveMaps.add(node.attributes)})};
+var nativeSetAttribute=Element.prototype.setAttribute,nativeSetAttributeNS=Element.prototype.setAttributeNS,nativeRemoveAttribute=Element.prototype.removeAttribute,nativeRemoveAttributeNS=Element.prototype.removeAttributeNS,nativeToggleAttribute=Element.prototype.toggleAttribute,nativeSetAttributeNode=Element.prototype.setAttributeNode,nativeSetAttributeNodeNS=Element.prototype.setAttributeNodeNS;
+var blockedAttribute=function(element,name){return sensitiveElement(element)||eventField(name)};
+define(Element.prototype,'setAttribute',function(name){if(blockedAttribute(this,name))return deny();return nativeSetAttribute.apply(this,arguments)});
+define(Element.prototype,'setAttributeNS',function(namespace,name){if(blockedAttribute(this,name))return deny();return nativeSetAttributeNS.apply(this,arguments)});
+define(Element.prototype,'removeAttribute',function(name){if(blockedAttribute(this,name))return deny();return nativeRemoveAttribute.apply(this,arguments)});
+define(Element.prototype,'removeAttributeNS',function(namespace,name){if(blockedAttribute(this,name))return deny();return nativeRemoveAttributeNS.apply(this,arguments)});
+define(Element.prototype,'toggleAttribute',function(name){if(blockedAttribute(this,name))return deny();return nativeToggleAttribute.apply(this,arguments)});
+define(Element.prototype,'setAttributeNode',function(attribute){if(sensitiveElement(this)||sensitiveAttribute(attribute))return deny();return nativeSetAttributeNode.apply(this,arguments)});
+define(Element.prototype,'setAttributeNodeNS',function(attribute){if(sensitiveElement(this)||sensitiveAttribute(attribute))return deny();return nativeSetAttributeNodeNS.apply(this,arguments)});
+if(typeof NamedNodeMap!=='undefined'){
+  ['setNamedItem','setNamedItemNS'].forEach(function(name){var original=NamedNodeMap.prototype[name];define(NamedNodeMap.prototype,name,function(attribute){if(sensitiveMaps.has(this)||sensitiveAttribute(attribute))return deny();return original.apply(this,arguments)})});
+  ['removeNamedItem','removeNamedItemNS'].forEach(function(name){var original=NamedNodeMap.prototype[name];define(NamedNodeMap.prototype,name,function(){if(sensitiveMaps.has(this)||eventField(arguments[0]))return deny();return original.apply(this,arguments)})});
+}
+var protectAttributeSetter=function(prototype,name){if(!prototype)return;var descriptor=nativeGetOwnPropertyDescriptor(prototype,name);if(descriptor&&descriptor.get&&descriptor.set)try{nativeDefineProperty(prototype,name,{get:descriptor.get,set:function(value){if(sensitiveAttribute(this))return deny();return descriptor.set.call(this,value)},enumerable:descriptor.enumerable,configurable:false})}catch(_){}};
+if(typeof Attr!=='undefined')protectAttributeSetter(Attr.prototype,'value');protectAttributeSetter(Node.prototype,'nodeValue');protectAttributeSetter(Node.prototype,'textContent');
+var protectSetter=function(prototype,name){if(!prototype)return;var descriptor=nativeGetOwnPropertyDescriptor(prototype,name);if(descriptor&&descriptor.get&&descriptor.set)try{nativeDefineProperty(prototype,name,{get:descriptor.get,set:deny,enumerable:descriptor.enumerable,configurable:false})}catch(_){}};
 if(typeof HTMLMetaElement!=='undefined'){protectSetter(HTMLMetaElement.prototype,'httpEquiv');protectSetter(HTMLMetaElement.prototype,'content')}
 if(typeof HTMLFormElement!=='undefined'){define(HTMLFormElement.prototype,'submit',deny);define(HTMLFormElement.prototype,'requestSubmit',deny)}
 define(Document.prototype,'write',deny);define(Document.prototype,'writeln',deny);
-Object.defineProperty(window,${JSON.stringify(registryName)},{value:function(){if(registered)return;registered=true;document.querySelectorAll('a[data-lotus-local-page]').forEach(function(anchor){var href=anchor.getAttribute('href');if(href)localPages.set(anchor,href)})},writable:false,configurable:false});
+var neutralize=function(root){if(!root)return;var nodes=[];if(root.nodeType===1)nodes.push(root);if(root.querySelectorAll)nodes=nodes.concat(Array.prototype.slice.call(root.querySelectorAll('*')));nodes.forEach(function(node){Array.prototype.slice.call(node.attributes||[]).forEach(function(attribute){if(eventField(attribute.name))nativeRemoveAttribute.call(node,attribute.name)});if(String(node.nodeName).toLowerCase()==='meta'&&String(node.getAttribute('http-equiv')||'').trim().toLowerCase()==='refresh'){if(node.parentNode)nativeRemoveChild.call(node.parentNode,node);return}if(sensitiveElement(node))sensitiveMaps.add(node.attributes)})};
+rememberSensitive(document);
+if(typeof MutationObserver!=='undefined'){var observer=new MutationObserver(function(records){records.forEach(function(record){if(record.type==='attributes')neutralize(record.target);else Array.prototype.slice.call(record.addedNodes).forEach(neutralize)})});observer.observe(document,{subtree:true,childList:true,attributes:true})}
+nativeDefineProperty(window,${JSON.stringify(registryName)},{value:function(){if(registered)return;registered=true;neutralize(document);rememberSensitive(document);document.querySelectorAll('a[data-lotus-local-page]').forEach(function(anchor){var href=anchor.getAttribute('href');if(href)localPages.set(anchor,href)})},writable:false,configurable:false});
 window.addEventListener('click',function(event){var target=event.target&&event.target.closest&&event.target.closest('a[href]');if(!target)return;var localHref=localPages.get(target),href=target.getAttribute('href')||'';if(localHref){event.preventDefault();event.stopImmediatePropagation();event.stopPropagation();if(!event.isTrusted||href!==localHref)return;send('navigation',{local:true});location.href=localHref;return}if(href.charAt(0)!=='#'){event.preventDefault();event.stopImmediatePropagation();event.stopPropagation()}},true);
 ['log','info','warn','error'].forEach(function(level){var original=console[level];console[level]=function(){var args=Array.prototype.slice.call(arguments,0,10).map(clean);send('console',{level:level,args:args});return original.apply(console,arguments)}});
 window.onerror=function(message,source,line,column){send('error',{message:clean(message),source:clean(source||''),line:Number(line)||0,column:Number(column)||0});return false};
 window.addEventListener('unhandledrejection',function(event){send('error',{message:clean(event.reason&&event.reason.message||event.reason||'Unhandled promise rejection'),source:'promise',line:0,column:0})});
 window.addEventListener('submit',function(event){event.preventDefault();event.stopImmediatePropagation();event.stopPropagation()},true);
+var eventTarget=function(target){return typeof EventTarget!=='undefined'&&target instanceof EventTarget},blockedProperty=function(target,name){return eventTarget(target)&&eventField(name)},seenPrototypes=new WeakSet();
+var safeFrameworkNoop=function(value){if(typeof value!=='function')return false;var source='';try{source=nativeFunctionToString.call(value).split('').filter(function(character){return character>' '}).join('')}catch(_){return false}return /^function[A-Za-z0-9_$]*noop[A-Za-z0-9_$]*[(][)][{]__lotusGuard_[a-z0-9]+[(][)][;][}]$/i.test(source)};
+var protectEventSetter=function(prototype,name){var descriptor=nativeGetOwnPropertyDescriptor(prototype,name);if(descriptor&&descriptor.get&&descriptor.set)try{nativeDefineProperty(prototype,name,{get:descriptor.get,set:function(value){if(value===null)return descriptor.set.call(this,value);if(safeFrameworkNoop(value))return;return deny()},enumerable:descriptor.enumerable,configurable:false})}catch(_){}};
+var protectEventHandlers=function(value){for(var prototype=value;prototype&&prototype!==Object.prototype;prototype=nativeGetPrototypeOf(prototype)){if(seenPrototypes.has(prototype))continue;seenPrototypes.add(prototype);try{nativeGetOwnPropertyNames(prototype).forEach(function(name){if(eventField(name))protectEventSetter(prototype,name)})}catch(_){}}};
+[window,document,document.documentElement,nativeCreate('div'),nativeCreateNS('http://www.w3.org/2000/svg','svg')].forEach(protectEventHandlers);
+nativeGetOwnPropertyNames(window).forEach(function(name){try{var descriptor=nativeGetOwnPropertyDescriptor(window,name),constructor=descriptor&&descriptor.value;if(typeof constructor==='function'&&constructor.prototype&&eventTarget(constructor.prototype))protectEventHandlers(constructor.prototype)}catch(_){}});
+define(Object,'defineProperty',function(target,name,descriptor){if(blockedProperty(target,name))return deny();return nativeDefineProperty(target,name,descriptor)});
+define(Object,'defineProperties',function(target,descriptors){if(eventTarget(target)&&nativeGetOwnPropertyNames(Object(descriptors)).some(eventField))return deny();return nativeDefineProperties(target,descriptors)});
+define(Reflect,'defineProperty',function(target,name,descriptor){if(blockedProperty(target,name))return deny();return nativeReflectDefineProperty(target,name,descriptor)});
+['__defineGetter__','__defineSetter__'].forEach(function(name){var original=Object.prototype[name];if(typeof original==='function')define(Object.prototype,name,function(property){if(blockedProperty(this,property))return deny();return original.apply(this,arguments)})});
 send('ready',{});
 })();</script>`
 }
 
-function secureDocumentStructure(source: string, registryName: string) {
+function secureDocumentStructure(source: string, registryName: string, scriptNonce: string) {
   const document = parse(source) as unknown as HtmlNode
   const html = document.childNodes?.find((node) => node.tagName === 'html')
   const head = html?.childNodes?.find((node) => node.tagName === 'head')
   if (!head) throw new Error('Unable to construct preview document.')
   head.childNodes ??= []
   head.childNodes = head.childNodes.filter((node) => !(node.tagName === 'meta' && attr(node, 'http-equiv')?.toLowerCase() === 'content-security-policy') && node.tagName !== 'base')
-  const policy = fragmentNode(`<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">`)
-  const bridge = fragmentNode(runtimeBridge(registryName))
+  const policy = fragmentNode(`<meta http-equiv="Content-Security-Policy" content="${previewCsp(scriptNonce)}">`)
+  const bridge = fragmentNode(runtimeBridge(registryName, scriptNonce))
   policy.parentNode = head
   bridge.parentNode = head
   head.childNodes.unshift(policy, bridge)
   return document
 }
 
-function moveUserScriptsAfterRegistration(document: HtmlNode, registryName: string) {
+function moveUserScriptsAfterRegistration(document: HtmlNode, registryName: string, scriptNonce: string) {
   const html = document.childNodes?.find((node) => node.tagName === 'html')
   const body = html?.childNodes?.find((node) => node.tagName === 'body')
   if (!body) throw new Error('Unable to construct preview document body.')
@@ -186,17 +227,18 @@ function moveUserScriptsAfterRegistration(document: HtmlNode, registryName: stri
   }
   collect(document)
   for (const script of scripts) replaceNode(script, null)
-  const register = fragmentNode(`<script data-lotus-runtime>${registryName}()</script>`)
+  const register = fragmentNode(`<script data-lotus-runtime nonce="${scriptNonce}">${registryName}()</script>`)
   register.parentNode = body
   body.childNodes ??= []
   body.childNodes.push(register)
-  for (const script of scripts) { script.parentNode = body; body.childNodes.push(script) }
+  for (const script of scripts) { setAttr(script, 'nonce', scriptNonce); script.parentNode = body; body.childNodes.push(script) }
 }
 
 export function finalizePreviewDocument(html: string) {
   const registryName = randomRegistryName()
-  const document = secureDocumentStructure(html, registryName)
-  moveUserScriptsAfterRegistration(document, registryName)
+  const scriptNonce = randomScriptNonce()
+  const document = secureDocumentStructure(html, registryName, scriptNonce)
+  moveUserScriptsAfterRegistration(document, registryName, scriptNonce)
   return serialize(document as never)
 }
 
@@ -222,7 +264,8 @@ function splitReference(reference: string) {
 function assemblePage(entryPath: string, source: string, byPath: Map<string, string>, diagnostics: PreviewDiagnostic[], visited: Set<string>, budget: AssemblyBudget): string {
   reserveBudget(budget, utf8Bytes(source), approximateMarkupNodes(source))
   const registryName = randomRegistryName()
-  const document = secureDocumentStructure(source, registryName)
+  const scriptNonce = randomScriptNonce()
+  const document = secureDocumentStructure(source, registryName, scriptNonce)
   const walk = (node: HtmlNode) => {
     reserveBudget(budget, 0, 1)
     for (const child of [...(node.childNodes ?? [])]) walk(child)
@@ -283,7 +326,7 @@ function assemblePage(entryPath: string, source: string, byPath: Map<string, str
     }
   }
   walk(document)
-  moveUserScriptsAfterRegistration(document, registryName)
+  moveUserScriptsAfterRegistration(document, registryName, scriptNonce)
   reserveBudget(budget, estimateSerializedBytes(document))
   const output = serialize(document as never)
   return output

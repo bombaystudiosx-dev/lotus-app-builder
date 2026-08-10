@@ -177,8 +177,8 @@ importers:
         specifier: ^27.4.0
         version: 27.4.0(@noble/hashes@2.3.0)
       playwright-core:
-        specifier: 1.55.0
-        version: 1.55.0
+        specifier: 1.62.1
+        version: 1.62.1
       postcss:
         specifier: '>=8.5.23'
         version: 8.5.23
@@ -3917,9 +3917,9 @@ packages:
     resolution: {integrity: sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ==}
     engines: {node: '>=16.20.0'}
 
-  playwright-core@1.55.0:
-    resolution: {integrity: sha512-GvZs4vU3U5ro2nZpeiwyb0zuFaqb9sUiAJuyrWpcGouD8y9/HLgGbNRjIph7zU9D3hnPaisMl9zG9CgFi/biIg==}
-    engines: {node: '>=18'}
+  playwright-core@1.62.1:
+    resolution: {integrity: sha512-wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw==}
+    engines: {node: '>=20'}
     hasBin: true
 
   possible-typed-array-names@1.1.0:
@@ -8376,7 +8376,7 @@ snapshots:
 
   pkce-challenge@5.0.1: {}
 
-  playwright-core@1.55.0: {}
+  playwright-core@1.62.1: {}
 
   possible-typed-array-names@1.1.0: {}
 

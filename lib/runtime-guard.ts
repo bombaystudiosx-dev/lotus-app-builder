@@ -1,8 +1,11 @@
 import { parse } from 'acorn'
 
 type AstNode = { type: string; start: number; end: number; body?: AstNode; [key: string]: unknown }
+type ReflectionKind = 'apply' | 'get' | 'getOwnPropertyDescriptor' | 'getOwnPropertyDescriptors' | 'getPrototypeOf' | 'lookupGetter'
+type ReflectionCall = { kind: ReflectionKind; args: AstNode[] | null; receiver?: AstNode }
 
 const GUARD_MARKER = '/* lotus-runtime-guard */'
+const MAX_ALIAS_PASSES = 64
 
 function guardSource(guardName: string, stateName: string, nowName: string, queueName: string) {
   return `${GUARD_MARKER}
@@ -52,30 +55,178 @@ function isGlobalObject(node: AstNode | undefined, aliases: Set<string>): boolea
   return property === 'defaultView' && identifierName(node.object as AstNode) === 'document' || property === 'window' && isGlobalObject(node.object as AstNode, aliases)
 }
 
-function isLocationReference(node: AstNode | undefined, globalAliases: Set<string>, locationAliases: Set<string>): boolean {
+function isBuiltin(node: AstNode | undefined, name: string, aliases: Set<string>) {
+  const identifier = identifierName(node)
+  return identifier === name || Boolean(identifier && aliases.has(identifier))
+}
+
+function isObjectPrototype(node: AstNode | undefined, objectAliases: Set<string>) {
+  return node?.type === 'MemberExpression'
+    && memberName(node) === 'prototype'
+    && isBuiltin(node.object as AstNode, 'Object', objectAliases)
+}
+
+function isReflectionNamespace(node: AstNode | undefined, reflectAliases: Set<string>, objectAliases: Set<string>) {
+  return isBuiltin(node, 'Reflect', reflectAliases) || isBuiltin(node, 'Object', objectAliases) || isObjectPrototype(node, objectAliases)
+}
+
+function reflectionKind(
+  node: AstNode | undefined,
+  reflectAliases: Set<string>,
+  objectAliases: Set<string>,
+  functionAliases: Map<string, ReflectionKind>,
+): ReflectionKind | null {
+  if (node?.type === 'CallExpression') {
+    const callee = node.callee as AstNode | undefined
+    if (callee?.type === 'MemberExpression' && memberName(callee) === 'bind') {
+      return reflectionKind(callee.object as AstNode, reflectAliases, objectAliases, functionAliases)
+    }
+  }
+  const identifier = identifierName(node)
+  if (identifier && functionAliases.has(identifier)) return functionAliases.get(identifier) ?? null
+  if (node?.type !== 'MemberExpression') return null
+  const property = memberName(node)
+  const owner = node.object as AstNode | undefined
+  if (isBuiltin(owner, 'Reflect', reflectAliases) && (property === 'apply' || property === 'get')) return property
+  if (isBuiltin(owner, 'Object', objectAliases) && ['getOwnPropertyDescriptor', 'getOwnPropertyDescriptors', 'getPrototypeOf'].includes(property ?? '')) return property as ReflectionKind
+  if (property === '__lookupGetter__' || property === '__lookupSetter__') return 'lookupGetter'
+  return null
+}
+
+function reflectionCall(
+  node: AstNode | undefined,
+  reflectAliases: Set<string>,
+  objectAliases: Set<string>,
+  functionAliases: Map<string, ReflectionKind>,
+): ReflectionCall | null {
+  if (node?.type !== 'CallExpression') return null
+  const callee = node.callee as AstNode | undefined
+  const rawArgs = node.arguments as AstNode[] | undefined ?? []
+  if (callee?.type === 'MemberExpression' && ['call', 'apply'].includes(memberName(callee) ?? '')) {
+    const kind = reflectionKind(callee.object as AstNode, reflectAliases, objectAliases, functionAliases)
+    if (!kind) return null
+    if (memberName(callee) === 'call') return { kind, receiver: rawArgs[0], args: rawArgs.slice(1) }
+    const supplied = rawArgs[1]
+    return {
+      kind,
+      receiver: rawArgs[0],
+      args: supplied?.type === 'ArrayExpression' ? ((supplied.elements as AstNode[] | undefined) ?? []).filter(Boolean) : null,
+    }
+  }
+  const kind = reflectionKind(callee, reflectAliases, objectAliases, functionAliases)
+  if (!kind) return null
+  return { kind, receiver: callee?.type === 'MemberExpression' ? callee.object as AstNode : undefined, args: rawArgs }
+}
+
+function isNavigationContainer(
+  node: AstNode | undefined,
+  globalAliases: Set<string>,
+  navigationAliases: Set<string>,
+  reflectAliases: Set<string>,
+  objectAliases: Set<string>,
+  functionAliases: Map<string, ReflectionKind>,
+): boolean {
+  const identifier = identifierName(node)
+  if (identifier === 'document' || identifier && navigationAliases.has(identifier) || isGlobalObject(node, globalAliases)) return true
+  if (node?.type === 'MemberExpression') {
+    const owner = identifierName(node.object as AstNode)
+    if (memberName(node) === 'prototype' && (owner === 'Window' || owner === 'Document')) return true
+    if (memberName(node) === '__proto__') {
+      return isNavigationContainer(node.object as AstNode, globalAliases, navigationAliases, reflectAliases, objectAliases, functionAliases)
+    }
+  }
+  const reflected = reflectionCall(node, reflectAliases, objectAliases, functionAliases)
+  return reflected?.kind === 'getPrototypeOf'
+    && Boolean(reflected.args?.[0])
+    && isNavigationContainer(reflected.args?.[0], globalAliases, navigationAliases, reflectAliases, objectAliases, functionAliases)
+}
+
+function isLocationReference(
+  node: AstNode | undefined,
+  globalAliases: Set<string>,
+  navigationAliases: Set<string>,
+  locationAliases: Set<string>,
+  reflectAliases: Set<string>,
+  objectAliases: Set<string>,
+  functionAliases: Map<string, ReflectionKind>,
+): boolean {
   if (!node) return false
   const identifier = identifierName(node)
   if (identifier === 'location' || identifier && locationAliases.has(identifier)) return true
   if (node.type === 'MemberExpression') {
-    return memberName(node) === 'location' && (isGlobalObject(node.object as AstNode, globalAliases) || identifierName(node.object as AstNode) === 'document')
+    return memberName(node) === 'location'
+      && isNavigationContainer(node.object as AstNode, globalAliases, navigationAliases, reflectAliases, objectAliases, functionAliases)
   }
-  if (node.type !== 'CallExpression') return false
-  const callee = node.callee as AstNode | undefined
-  const args = node.arguments as AstNode[] | undefined
-  return callee?.type === 'MemberExpression'
-    && identifierName(callee.object as AstNode) === 'Reflect'
-    && memberName(callee) === 'get'
-    && isGlobalObject(args?.[0], globalAliases)
-    && constantString(args?.[1]) === 'location'
+  const reflected = reflectionCall(node, reflectAliases, objectAliases, functionAliases)
+  return reflected?.kind === 'get'
+    && constantString(reflected.args?.[1]) === 'location'
+    && isNavigationContainer(reflected.args?.[0], globalAliases, navigationAliases, reflectAliases, objectAliases, functionAliases)
 }
 
-function objectPatternRequestsBlockedCapability(target: AstNode | undefined, value: AstNode | undefined, globalAliases: Set<string>, locationAliases: Set<string>) {
+function isBlockedReflectionCall(
+  node: AstNode,
+  globalAliases: Set<string>,
+  navigationAliases: Set<string>,
+  reflectAliases: Set<string>,
+  objectAliases: Set<string>,
+  functionAliases: Map<string, ReflectionKind>,
+) {
+  const reflected = reflectionCall(node, reflectAliases, objectAliases, functionAliases)
+  if (!reflected || reflected.kind === 'getPrototypeOf') return false
+  if (reflected.kind === 'apply') {
+    return reflected.args === null || reflectionKind(reflected.args?.[0], reflectAliases, objectAliases, functionAliases) !== null
+  }
+  const blockedName = (candidate: AstNode | undefined) => ['location', 'navigation'].includes(constantString(candidate) ?? '')
+  const unknownName = (candidate: AstNode | undefined) => constantString(candidate) === null
+  const target = reflected.args?.[0]
+  if (reflected.kind === 'getOwnPropertyDescriptors') {
+    return !reflected.args || isNavigationContainer(target, globalAliases, navigationAliases, reflectAliases, objectAliases, functionAliases)
+  }
+  if (reflected.kind === 'lookupGetter') {
+    const key = reflected.args?.[0]
+    return blockedName(key)
+      || Boolean(reflected.receiver && isNavigationContainer(reflected.receiver, globalAliases, navigationAliases, reflectAliases, objectAliases, functionAliases) && unknownName(key))
+      || reflected.args === null
+  }
+  const key = reflected.args?.[1]
+  return blockedName(key)
+    || Boolean(isNavigationContainer(target, globalAliases, navigationAliases, reflectAliases, objectAliases, functionAliases) && unknownName(key))
+    || reflected.args === null
+}
+
+function patternBindingName(node: AstNode | undefined) {
+  if (node?.type === 'AssignmentPattern') return identifierName(node.left as AstNode)
+  return identifierName(node)
+}
+
+function destructuredReflectionKind(
+  value: AstNode,
+  key: string | null,
+  reflectAliases: Set<string>,
+  objectAliases: Set<string>,
+): ReflectionKind | null {
+  if (isBuiltin(value, 'Reflect', reflectAliases) && (key === 'apply' || key === 'get')) return key
+  if (isBuiltin(value, 'Object', objectAliases) && ['getOwnPropertyDescriptor', 'getOwnPropertyDescriptors', 'getPrototypeOf'].includes(key ?? '')) return key as ReflectionKind
+  if (isObjectPrototype(value, objectAliases) && (key === '__lookupGetter__' || key === '__lookupSetter__')) return 'lookupGetter'
+  return null
+}
+
+function objectPatternRequestsBlockedCapability(
+  target: AstNode | undefined,
+  value: AstNode | undefined,
+  globalAliases: Set<string>,
+  navigationAliases: Set<string>,
+  locationAliases: Set<string>,
+  reflectAliases: Set<string>,
+  objectAliases: Set<string>,
+  functionAliases: Map<string, ReflectionKind>,
+) {
   if (target?.type !== 'ObjectPattern' || !value) return false
   const properties = target.properties as AstNode[] | undefined
   if (!properties) return false
   const keys = properties.map((property) => constantString(property.key as AstNode) ?? identifierName(property.key as AstNode))
-  if (isGlobalObject(value, globalAliases)) return keys.some((key) => key === 'location' || key === 'navigation')
-  if (isLocationReference(value, globalAliases, locationAliases)) return keys.some((key) => ['href', 'assign', 'replace', 'reload'].includes(key ?? ''))
+  if (isNavigationContainer(value, globalAliases, navigationAliases, reflectAliases, objectAliases, functionAliases)) return keys.some((key) => key === 'location' || key === 'navigation')
+  if (isLocationReference(value, globalAliases, navigationAliases, locationAliases, reflectAliases, objectAliases, functionAliases)) return keys.some((key) => ['href', 'assign', 'replace', 'reload'].includes(key ?? ''))
   return false
 }
 
@@ -95,22 +246,46 @@ export function hasBlockedBrowserCapability(source: string) {
   let ast: AstNode
   try { ast = parse(source, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true }) as unknown as AstNode } catch { return false }
   const globalAliases = new Set<string>()
+  const navigationAliases = new Set<string>()
   const locationAliases = new Set<string>()
+  const reflectAliases = new Set<string>()
+  const objectAliases = new Set<string>()
+  const reflectionFunctionAliases = new Map<string, ReflectionKind>()
   let blockedBinding = false
   let aliasesChanged = true
-  while (aliasesChanged) {
+  let aliasPasses = 0
+  while (aliasesChanged && aliasPasses < MAX_ALIAS_PASSES) {
+    aliasPasses += 1
     aliasesChanged = false
     walk(ast, (node) => {
       if (node.type !== 'VariableDeclarator' && node.type !== 'AssignmentExpression') return
       const target = (node.id ?? node.left) as AstNode | undefined
       const value = (node.init ?? node.right) as AstNode | undefined
-      if (objectPatternRequestsBlockedCapability(target, value, globalAliases, locationAliases)) blockedBinding = true
+      if (!value) return
+      if (objectPatternRequestsBlockedCapability(target, value, globalAliases, navigationAliases, locationAliases, reflectAliases, objectAliases, reflectionFunctionAliases)) blockedBinding = true
+      if (target?.type === 'ObjectPattern') {
+        for (const property of target.properties as AstNode[] | undefined ?? []) {
+          const key = constantString(property.key as AstNode) ?? identifierName(property.key as AstNode)
+          const name = patternBindingName(property.value as AstNode)
+          const kind = destructuredReflectionKind(value, key, reflectAliases, objectAliases)
+          if (name && kind) {
+            blockedBinding = true
+            if (reflectionFunctionAliases.get(name) !== kind) { reflectionFunctionAliases.set(name, kind); aliasesChanged = true }
+          }
+        }
+      }
       const name = identifierName(target)
-      if (!name || !value) return
+      if (!name) return
+      if (!reflectAliases.has(name) && isBuiltin(value, 'Reflect', reflectAliases)) { reflectAliases.add(name); aliasesChanged = true }
+      if (!objectAliases.has(name) && isBuiltin(value, 'Object', objectAliases)) { objectAliases.add(name); aliasesChanged = true }
+      const kind = reflectionKind(value, reflectAliases, objectAliases, reflectionFunctionAliases)
+      if (kind && reflectionFunctionAliases.get(name) !== kind) { reflectionFunctionAliases.set(name, kind); aliasesChanged = true }
       if (!globalAliases.has(name) && isGlobalObject(value, globalAliases)) { globalAliases.add(name); aliasesChanged = true }
-      if (!locationAliases.has(name) && isLocationReference(value, globalAliases, locationAliases)) { locationAliases.add(name); aliasesChanged = true }
+      if (!navigationAliases.has(name) && isNavigationContainer(value, globalAliases, navigationAliases, reflectAliases, objectAliases, reflectionFunctionAliases)) { navigationAliases.add(name); aliasesChanged = true }
+      if (!locationAliases.has(name) && isLocationReference(value, globalAliases, navigationAliases, locationAliases, reflectAliases, objectAliases, reflectionFunctionAliases)) { locationAliases.add(name); aliasesChanged = true }
     })
   }
+  if (aliasesChanged) return true
   if (blockedBinding) return true
   let blocked = false
   walk(ast, (node) => {
@@ -119,17 +294,20 @@ export function hasBlockedBrowserCapability(source: string) {
     if (node.type === 'MemberExpression') {
       const owner = node.object as AstNode | undefined
       const property = memberName(node)
-      if (node.computed && isGlobalObject(owner, globalAliases) && property === null) { blocked = true; return }
-      if (isGlobalObject(owner, globalAliases) && property === 'navigation') { blocked = true; return }
-      if (isLocationReference(node, globalAliases, locationAliases)) { blocked = true; return }
-      if (isLocationReference(owner, globalAliases, locationAliases) && ['href', 'assign', 'replace', 'reload'].includes(property ?? '')) { blocked = true; return }
+      if (node.computed && property === null && isReflectionNamespace(owner, reflectAliases, objectAliases)) { blocked = true; return }
+      if (reflectionKind(node, reflectAliases, objectAliases, reflectionFunctionAliases)) { blocked = true; return }
+      if (node.computed && isNavigationContainer(owner, globalAliases, navigationAliases, reflectAliases, objectAliases, reflectionFunctionAliases) && property === null) { blocked = true; return }
+      if (isNavigationContainer(owner, globalAliases, navigationAliases, reflectAliases, objectAliases, reflectionFunctionAliases) && property === 'navigation') { blocked = true; return }
+      if (isLocationReference(node, globalAliases, navigationAliases, locationAliases, reflectAliases, objectAliases, reflectionFunctionAliases)) { blocked = true; return }
+      if (isLocationReference(owner, globalAliases, navigationAliases, locationAliases, reflectAliases, objectAliases, reflectionFunctionAliases) && ['href', 'assign', 'replace', 'reload'].includes(property ?? '')) { blocked = true; return }
     }
     if (node.type === 'AssignmentExpression' || node.type === 'UpdateExpression') {
       const target = (node.left ?? node.argument) as AstNode | undefined
-      if (isLocationReference(target, globalAliases, locationAliases) || target?.type === 'MemberExpression' && isLocationReference(target.object as AstNode, globalAliases, locationAliases) && ['href', 'assign', 'replace', 'reload'].includes(memberName(target) ?? '')) { blocked = true; return }
+      if (isLocationReference(target, globalAliases, navigationAliases, locationAliases, reflectAliases, objectAliases, reflectionFunctionAliases) || target?.type === 'MemberExpression' && isLocationReference(target.object as AstNode, globalAliases, navigationAliases, locationAliases, reflectAliases, objectAliases, reflectionFunctionAliases) && ['href', 'assign', 'replace', 'reload'].includes(memberName(target) ?? '')) { blocked = true; return }
       if (target?.type === 'MemberExpression' && ['innerHTML', 'outerHTML'].includes(memberName(target) ?? '')) { blocked = true; return }
     }
     if (node.type !== 'CallExpression' && node.type !== 'NewExpression') return
+    if (node.type === 'CallExpression' && isBlockedReflectionCall(node, globalAliases, navigationAliases, reflectAliases, objectAliases, reflectionFunctionAliases)) { blocked = true; return }
     const callee = node.callee as AstNode | undefined
     const direct = identifierName(callee)
     const property = memberName(callee)
@@ -137,10 +315,10 @@ export function hasBlockedBrowserCapability(source: string) {
     if (['eval', 'Function', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker'].includes(direct ?? '')) { blocked = true; return }
     if (isDynamicConstructorReference(callee)) { blocked = true; return }
     if (isGlobalObject(owner, globalAliases) && ['eval', 'Function', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'open'].includes(property ?? '')) { blocked = true; return }
-    if (isLocationReference(owner, globalAliases, locationAliases) && ['assign', 'replace', 'reload'].includes(property ?? '')) { blocked = true; return }
+    if (isLocationReference(owner, globalAliases, navigationAliases, locationAliases, reflectAliases, objectAliases, reflectionFunctionAliases) && ['assign', 'replace', 'reload'].includes(property ?? '')) { blocked = true; return }
     const argumentsList = node.arguments as AstNode[] | undefined
-    if (argumentsList?.some((argument) => isLocationReference(argument, globalAliases, locationAliases))) { blocked = true; return }
-    if (property === 'navigate' || ['get', 'set', 'defineProperty', 'getOwnPropertyDescriptor', 'getOwnPropertyDescriptors'].includes(property ?? '') && isGlobalObject(argumentsList?.[0], globalAliases) && (constantString(argumentsList?.[1]) === null || ['location', 'navigation'].includes(constantString(argumentsList?.[1]) ?? ''))) { blocked = true; return }
+    if (argumentsList?.some((argument) => isLocationReference(argument, globalAliases, navigationAliases, locationAliases, reflectAliases, objectAliases, reflectionFunctionAliases))) { blocked = true; return }
+    if (property === 'navigate' || ['set', 'defineProperty'].includes(property ?? '') && isGlobalObject(argumentsList?.[0], globalAliases) && (constantString(argumentsList?.[1]) === null || ['location', 'navigation'].includes(constantString(argumentsList?.[1]) ?? ''))) { blocked = true; return }
     if (property === 'construct' && (identifierName(argumentsList?.[0]) === 'Function' || isDynamicConstructorReference(argumentsList?.[0]))) { blocked = true; return }
     if (property === 'sendBeacon' && identifierName(owner) === 'navigator') { blocked = true; return }
     if (['insertAdjacentHTML', 'createContextualFragment', 'write', 'writeln'].includes(property ?? '')) { blocked = true; return }
