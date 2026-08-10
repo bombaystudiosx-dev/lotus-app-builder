@@ -128,7 +128,7 @@ export interface Workspace {
 export async function getWorkspace(projectId: string): Promise<Workspace | null> {
   const userId = await getUserId()
   const proj = await projects.get(userId, projectId)
-  if (!proj || proj.status === 'trashed') return null
+  if (!proj || proj.status !== 'active') return null
 
   const rows = await db
     .select()
@@ -202,15 +202,16 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
 
   // Ensure a project exists (scoped to this user).
   let projectId = input.projectId
-  if (projectId && !await projects.get(userId, projectId)) throw new Error('Project not found.')
+  const existingProject = projectId ? await projects.get(userId, projectId) : null
+  if (projectId && !existingProject) throw new Error('Project not found.')
+  if (existingProject?.status !== 'active') throw new Error('Project is not active.')
   let projectName = deriveName(safePrompt)
   if (!projectId) {
     const created = await projects.createBlank(userId, projectName)
     projectId = created.id
     projectName = created.name
   } else {
-    const existing = await projects.get(userId, projectId)
-    if (existing) projectName = existing.name
+    projectName = existingProject.name
   }
 
   // Persist the user's message immediately.

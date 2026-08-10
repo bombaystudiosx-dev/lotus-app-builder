@@ -1,8 +1,8 @@
 import type Database from 'better-sqlite3'
 
-const SCHEMA_VERSION = 3
+const SCHEMA_VERSION = 4
 
-const CREATE_TABLES_SQL = `
+const CREATE_BASE_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS user (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
     emailVerified INTEGER NOT NULL DEFAULT 0, image TEXT,
@@ -30,23 +30,32 @@ const CREATE_TABLES_SQL = `
     files TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'active', archivedAt INTEGER, deletedAt INTEGER,
     createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
   );
-  CREATE TABLE IF NOT EXISTS project_file (
-    id TEXT PRIMARY KEY, projectId TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
-    path TEXT NOT NULL, content TEXT NOT NULL, encoding TEXT NOT NULL DEFAULT 'utf-8', size INTEGER NOT NULL,
-    originalPath TEXT, deletedAt INTEGER, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS project_runtime (
-    projectId TEXT PRIMARY KEY REFERENCES project(id) ON DELETE CASCADE,
-    runtime TEXT NOT NULL DEFAULT 'static', framework TEXT NOT NULL DEFAULT 'static', buildTool TEXT,
-    entryPath TEXT NOT NULL DEFAULT 'index.html', metadata TEXT NOT NULL DEFAULT '{}', createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
-  );
   CREATE TABLE IF NOT EXISTS user_settings (
     userId TEXT PRIMARY KEY REFERENCES user(id) ON DELETE CASCADE,
     theme TEXT NOT NULL DEFAULT 'system', editorFontSize INTEGER NOT NULL DEFAULT 14,
     autosaveInterval INTEGER NOT NULL DEFAULT 30, defaultDevice TEXT NOT NULL DEFAULT 'phone',
     createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
   );
-  CREATE TABLE IF NOT EXISTS message (
+`
+
+const CREATE_PROJECT_FILE_TABLE_SQL = `
+  CREATE TABLE project_file (
+    id TEXT PRIMARY KEY, projectId TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    path TEXT NOT NULL, content TEXT NOT NULL, encoding TEXT NOT NULL DEFAULT 'utf-8', size INTEGER NOT NULL,
+    originalPath TEXT, deletedAt INTEGER, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
+  );
+`
+
+const CREATE_PROJECT_RUNTIME_TABLE_SQL = `
+  CREATE TABLE project_runtime (
+    projectId TEXT PRIMARY KEY REFERENCES project(id) ON DELETE CASCADE,
+    runtime TEXT NOT NULL DEFAULT 'static', framework TEXT NOT NULL DEFAULT 'static', buildTool TEXT,
+    entryPath TEXT NOT NULL DEFAULT 'index.html', metadata TEXT NOT NULL DEFAULT '{}', createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
+  );
+`
+
+const CREATE_MESSAGE_TABLE_SQL = `
+  CREATE TABLE message (
     id TEXT PRIMARY KEY, projectId TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
     userId TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
     role TEXT NOT NULL, content TEXT NOT NULL, createdAt INTEGER NOT NULL
@@ -124,19 +133,53 @@ function rebuildProjectTable(sqlite: Database.Database) {
 }
 
 function rebuildMessageTable(sqlite: Database.Database) {
-  if (!tableExists(sqlite, 'message') || (hasForeignKey(sqlite, 'message', 'projectId', 'project') && hasForeignKey(sqlite, 'message', 'userId', 'user'))) return
+  if (!tableExists(sqlite, 'message')) {
+    sqlite.exec(CREATE_MESSAGE_TABLE_SQL)
+    return
+  }
+  if (hasForeignKey(sqlite, 'message', 'projectId', 'project') && hasForeignKey(sqlite, 'message', 'userId', 'user')) return
   assertNoOrphans(sqlite, 'message', 'projectId', 'project')
   assertNoOrphans(sqlite, 'message', 'userId', 'user')
   sqlite.exec(`
     ALTER TABLE message RENAME TO message_legacy;
-    CREATE TABLE message (
-      id TEXT PRIMARY KEY, projectId TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
-      userId TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
-      role TEXT NOT NULL, content TEXT NOT NULL, createdAt INTEGER NOT NULL
-    );
+    ${CREATE_MESSAGE_TABLE_SQL}
     INSERT INTO message (id, projectId, userId, role, content, createdAt)
       SELECT id, projectId, userId, role, content, createdAt FROM message_legacy;
     DROP TABLE message_legacy;
+  `)
+}
+
+function rebuildProjectFileTable(sqlite: Database.Database) {
+  if (!tableExists(sqlite, 'project_file')) {
+    sqlite.exec(CREATE_PROJECT_FILE_TABLE_SQL)
+    return
+  }
+  if (hasForeignKey(sqlite, 'project_file', 'projectId', 'project')) return
+  assertNoOrphans(sqlite, 'project_file', 'projectId', 'project')
+  const originalPath = columnExists(sqlite, 'project_file', 'originalPath') ? 'originalPath' : 'NULL'
+  const deletedAt = columnExists(sqlite, 'project_file', 'deletedAt') ? 'deletedAt' : 'NULL'
+  sqlite.exec(`
+    ALTER TABLE project_file RENAME TO project_file_legacy;
+    ${CREATE_PROJECT_FILE_TABLE_SQL}
+    INSERT INTO project_file (id, projectId, path, content, encoding, size, originalPath, deletedAt, createdAt, updatedAt)
+      SELECT id, projectId, path, content, encoding, size, ${originalPath}, ${deletedAt}, createdAt, updatedAt FROM project_file_legacy;
+    DROP TABLE project_file_legacy;
+  `)
+}
+
+function rebuildProjectRuntimeTable(sqlite: Database.Database) {
+  if (!tableExists(sqlite, 'project_runtime')) {
+    sqlite.exec(CREATE_PROJECT_RUNTIME_TABLE_SQL)
+    return
+  }
+  if (hasForeignKey(sqlite, 'project_runtime', 'projectId', 'project')) return
+  assertNoOrphans(sqlite, 'project_runtime', 'projectId', 'project')
+  sqlite.exec(`
+    ALTER TABLE project_runtime RENAME TO project_runtime_legacy;
+    ${CREATE_PROJECT_RUNTIME_TABLE_SQL}
+    INSERT INTO project_runtime (projectId, runtime, framework, buildTool, entryPath, metadata, createdAt, updatedAt)
+      SELECT projectId, runtime, framework, buildTool, entryPath, metadata, createdAt, updatedAt FROM project_runtime_legacy;
+    DROP TABLE project_runtime_legacy;
   `)
 }
 
@@ -148,10 +191,30 @@ function safeLegacyPath(value: string, ordinal: number) {
   return `legacy/file-${ordinal}-${Buffer.from(value).toString('base64url').slice(0, 80) || 'unnamed'}.txt`
 }
 
-function migrateLegacyProjectFiles(sqlite: Database.Database) {
+function uniqueLegacyPath(path: string, originalPath: string, ordinal: number, occupied: Set<string>) {
+  if (!occupied.has(path)) {
+    occupied.add(path)
+    return path
+  }
+  const token = Buffer.from(originalPath).toString('base64url').slice(0, 80) || 'unnamed'
+  let attempt = 0
+  let candidate = `legacy/collision-${ordinal}-${token}.txt`
+  while (occupied.has(candidate)) {
+    attempt += 1
+    candidate = `legacy/collision-${ordinal}-${token}-${attempt}.txt`
+  }
+  occupied.add(candidate)
+  return candidate
+}
+
+function migrateLegacyProjectFiles(sqlite: Database.Database, priorVersion: number) {
   if (!tableExists(sqlite, 'project_file') || !columnExists(sqlite, 'project', 'files')) return
   const projects = sqlite.prepare('SELECT id, files, createdAt, updatedAt FROM project').all() as Array<{ id: string; files: string; createdAt: number; updatedAt: number }>
-  const insert = sqlite.prepare(`INSERT OR IGNORE INTO project_file (id, projectId, path, content, encoding, size, originalPath, createdAt, updatedAt)
+  if (priorVersion >= 3) {
+    sqlite.prepare("UPDATE project SET files = '{}' WHERE files != '{}'").run()
+    return
+  }
+  const insert = sqlite.prepare(`INSERT INTO project_file (id, projectId, path, content, encoding, size, originalPath, createdAt, updatedAt)
     VALUES (?, ?, ?, ?, 'utf-8', ?, ?, ?, ?)`)
   const runtime = sqlite.prepare(`INSERT OR IGNORE INTO project_runtime (projectId, runtime, framework, buildTool, entryPath, metadata, createdAt, updatedAt)
     VALUES (?, 'static', 'static', NULL, 'index.html', '{}', ?, ?)`)
@@ -161,26 +224,37 @@ function migrateLegacyProjectFiles(sqlite: Database.Database) {
     try { legacy = JSON.parse(row.files || '{}') } catch { legacy = { 'legacy/files.json': row.files } }
     if (!legacy || typeof legacy !== 'object' || Array.isArray(legacy)) legacy = { 'legacy/files.json': JSON.stringify(legacy) }
     let ordinal = 0
+    const occupied = new Set<string>()
     for (const [originalPath, rawContent] of Object.entries(legacy as Record<string, unknown>)) {
       ordinal += 1
-      const path = safeLegacyPath(originalPath, ordinal)
+      const path = uniqueLegacyPath(safeLegacyPath(originalPath, ordinal), originalPath, ordinal, occupied)
       const content = typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)
-      insert.run(crypto.randomUUID(), row.id, path, content, Buffer.byteLength(content, 'utf8'), path === originalPath ? null : originalPath, row.createdAt, row.updatedAt)
+      insert.run(crypto.randomUUID(), row.id, path, content, Buffer.byteLength(content, 'utf8'), originalPath, row.createdAt, row.updatedAt)
     }
+    sqlite.prepare("UPDATE project SET files = '{}' WHERE id = ?").run(row.id)
   }
+}
+
+function assertForeignKeyIntegrity(sqlite: Database.Database) {
+  const violations = sqlite.prepare('PRAGMA foreign_key_check').all()
+  if (violations.length) throw new Error('Database migration left foreign key violations.')
 }
 
 /** Initializes or safely upgrades the local SQLite schema. Safe to call on every startup. */
 export function migrateDatabase(sqlite: Database.Database) {
+  const priorVersion = Number(sqlite.pragma('user_version', { simple: true }))
   sqlite.pragma('foreign_keys = OFF')
   try {
     const migrate = sqlite.transaction(() => {
-      sqlite.exec(CREATE_TABLES_SQL)
+      sqlite.exec(CREATE_BASE_TABLES_SQL)
       rebuildProjectTable(sqlite)
       upgradeProjectLifecycleColumns(sqlite)
       rebuildMessageTable(sqlite)
-      migrateLegacyProjectFiles(sqlite)
+      rebuildProjectFileTable(sqlite)
+      rebuildProjectRuntimeTable(sqlite)
+      migrateLegacyProjectFiles(sqlite, priorVersion)
       sqlite.exec(CREATE_INDEXES_SQL)
+      assertForeignKeyIntegrity(sqlite)
       sqlite.pragma(`user_version = ${SCHEMA_VERSION}`)
     })
     migrate.immediate()

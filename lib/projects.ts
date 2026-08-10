@@ -303,6 +303,7 @@ export function createProjectService(database: ProjectDatabase) {
         assertWritableProject(userId, projectId)
         const existing = findFile(userId, projectId, fileId)
         if (!existing) throw new ProjectLifecycleError('File not found.')
+        if (existing.size > MAX_FILE_BYTES) throw new ProjectLifecycleError('File is too large.')
         assertAvailablePath(projectId, safePath)
         assertProjectCapacity(projectId, existing.size)
         const now = Date.now()

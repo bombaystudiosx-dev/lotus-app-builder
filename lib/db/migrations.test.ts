@@ -111,8 +111,10 @@ describe('migrateDatabase', () => {
     expect(database.prepare("PRAGMA foreign_key_list('project_file')").all()).toContainEqual(expect.objectContaining({ from: 'projectId', table: 'project', to: 'id' }))
     expect(database.prepare("PRAGMA foreign_key_list('project_runtime')").all()).toContainEqual(expect.objectContaining({ from: 'projectId', table: 'project', to: 'id' }))
     database.prepare("INSERT INTO project_file VALUES ('extra-file', 'project-1', 'extra.js', 'export {}', 'utf-8', 9, NULL, NULL, 2, 2)").run()
-    database.prepare("UPDATE project_runtime SET metadata = '{\"checked\":\"yes\"}' WHERE projectId = 'project-1'").run()
+    database.prepare("INSERT INTO project VALUES ('project-2', 'user-1', 'Second project', 'html', '{}', 'active', NULL, NULL, 2, 2)").run()
+    database.prepare("INSERT INTO project_runtime VALUES ('project-2', 'static', 'static', NULL, 'index.html', '{}', 2, 2)").run()
     database.prepare("DELETE FROM project WHERE id = 'project-1'").run()
+    database.prepare("DELETE FROM project WHERE id = 'project-2'").run()
     expect(database.prepare('SELECT count(*) AS count FROM project_file').get()).toEqual({ count: 0 })
     expect(database.prepare('SELECT count(*) AS count FROM project_runtime').get()).toEqual({ count: 0 })
   })
@@ -130,7 +132,7 @@ describe('migrateDatabase', () => {
     migrateDatabase(database)
 
     expect(database.prepare("SELECT files FROM project WHERE id = 'project-1'").get()).toEqual({ files: '{}' })
-    expect(database.prepare("SELECT path, deletedAt FROM project_file WHERE projectId = 'project-1'").all()).toEqual([{ path: 'keep.txt', deletedAt: 2 }])
+    expect(database.prepare("SELECT path, content, deletedAt FROM project_file WHERE projectId = 'project-1'").all()).toEqual([{ path: 'keep.txt', content: 'one', deletedAt: 2 }])
   })
 
   it('keeps colliding slash and backslash legacy keys as separate normalized records', () => {
