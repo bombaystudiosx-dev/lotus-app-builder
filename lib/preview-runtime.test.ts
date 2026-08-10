@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { JSDOM } from 'jsdom'
 import {
   PREVIEW_SANDBOX,
   assembleStaticPreview,
@@ -26,6 +27,18 @@ describe('safe static preview assembly', () => {
     expect(output.html).toContain('data:text/html;base64,')
     expect(output.diagnostics).toEqual([])
     expect(output.html).not.toContain('src="images/mark.svg"')
+  })
+
+  it('executes an assembled static starter as a self-contained document', async () => {
+    const output = assembleStaticPreview(files({
+      'index.html': '<main id="root">Static starter</main><script src="app.js"></script>',
+      'app.js': 'document.getElementById("root").dataset.ready = "true"',
+    }), 'index.html')
+    const dom = new JSDOM(output.html, { runScripts: 'dangerously' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(dom.window.document.getElementById('root')).toHaveProperty('dataset.ready', 'true')
+    dom.window.close()
   })
 
   it('blocks unsafe and missing references and returns useful diagnostics', () => {
