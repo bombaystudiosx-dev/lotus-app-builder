@@ -53,4 +53,42 @@ describe('isolated local React bundler', () => {
     expect(result.html).toBe('')
     expect(result.diagnostics[0].message).toContain('unbounded loop')
   })
+
+  it('blocks absolute, file URL, UNC, Windows drive, and non-allowlisted bare imports without filesystem disclosure', async () => {
+    for (const request of ['C:/package.json', 'file:///C:/package.json', '\\\\server\\share\\secret.js', '/etc/passwd', 'not-allowed-package']) {
+      const result = await bundleReactProject([
+        reactStarter[0],
+        { path: 'src/main.tsx', content: `import secret from ${JSON.stringify(request)}; console.log(secret)` },
+      ], 'index.html')
+      expect(result.html).toBe('')
+      expect(result.diagnostics[0].message).toContain('Non-project import blocked')
+      expect(result.diagnostics.map((item) => item.message).join(' ')).not.toContain('lotus-app-builder')
+      expect(result.diagnostics.map((item) => item.message).join(' ')).not.toContain('"name"')
+    }
+  })
+
+  it('instruments computed loops so a Date-based runaway aborts within the runtime budget', async () => {
+    const result = await bundleReactProject([
+      reactStarter[0],
+      { path: 'src/main.tsx', content: 'while (Date.now()) {}' },
+    ], 'index.html')
+
+    expect(result.html).toContain('__lotusGuard')
+    expect(result.html).toContain('execution budget exceeded')
+  })
+
+  it('bundles virtual SVG and font assets without exposing filesystem paths', async () => {
+    const result = await bundleReactProject([
+      reactStarter[0],
+      { path: 'src/main.tsx', content: "import icon from './icon.svg'; import './font.css'; document.getElementById('root')!.innerHTML = `<img src='${icon}'>`" },
+      { path: 'src/icon.svg', content: '<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>' },
+      { path: 'src/font.css', content: "@font-face{font-family:x;src:url('./font.woff2')}" },
+      { path: 'src/font.woff2', content: 'AAECAwQ=' },
+    ], 'index.html')
+
+    expect(result.diagnostics).toEqual([])
+    expect(result.html).toContain('data:image/svg+xml')
+    expect(result.html).toContain('data:font/woff2')
+    expect(result.html).not.toContain(process.cwd())
+  })
 })

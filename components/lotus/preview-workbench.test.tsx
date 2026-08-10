@@ -53,13 +53,46 @@ describe('PreviewWorkbench', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('app.js:4:2')
   })
 
-  it('opens the preview in an opaque data URL without exposing an opener', () => {
+  it('exports an inert preview file instead of executing it in an unsandboxed new window', () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    const createObjectURL = vi.fn(() => 'blob:export')
+    const revokeObjectURL = vi.fn()
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL })
     render(<PreviewWorkbench html="<h1>Safe</h1>" />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open preview in new window' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Download preview HTML' }))
 
-    expect(open).toHaveBeenCalledWith(expect.stringMatching(/^data:text\/html/), '_blank', 'noopener,noreferrer')
+    expect(open).not.toHaveBeenCalled()
+    expect(createObjectURL).toHaveBeenCalled()
+    expect(click).toHaveBeenCalled()
     open.mockRestore()
+    click.mockRestore()
+  })
+
+  it('shows build diagnostics when no preview HTML exists', () => {
+    render(<PreviewWorkbench html="" diagnostics={[{ severity: 'error', path: 'src/main.tsx', message: 'Build failed' }]} />)
+    expect(screen.getByRole('alert')).toHaveTextContent('src/main.tsx: Build failed')
+  })
+
+  it('drops malformed, oversized, and flooding preview messages', () => {
+    render(<PreviewWorkbench html="<p>Safe</p>" />)
+    const frame = screen.getByTitle('App preview') as HTMLIFrameElement
+    const source = frame.contentWindow
+    Object.defineProperty(frame, 'contentWindow', { value: source })
+    const dispatch = (data: unknown, eventSource: MessageEventSource | null = source) => {
+      const event = new MessageEvent('message', { data })
+      Object.defineProperty(event, 'source', { value: eventSource })
+      fireEvent(window, event)
+    }
+    dispatch({ type: 'lotus-preview-event', kind: 'console', payload: { level: 'info', args: ['x'.repeat(20_000)] } })
+    dispatch({ type: 'lotus-preview-event', kind: 'error', payload: { message: { nested: true } } })
+    dispatch({ type: 'lotus-preview-event', kind: 'console', payload: { level: 'info', args: ['wrong source'] } }, window)
+    for (let index = 0; index < 100; index += 1) dispatch({ type: 'lotus-preview-event', kind: 'console', payload: { level: 'info', args: [`event-${index}`] } })
+
+    expect(screen.queryByText(/wrong source/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/nested/)).not.toBeInTheDocument()
+    expect(screen.getAllByText(/event-/).length).toBeLessThanOrEqual(40)
   })
 })

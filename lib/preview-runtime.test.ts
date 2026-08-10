@@ -82,4 +82,31 @@ describe('safe static preview assembly', () => {
     expect(previewViewport({ device: 'tablet', orientation: 'landscape', zoom: 75 })).toEqual({ width: 1024, height: 768, scale: 0.75 })
     expect(previewViewport({ device: 'custom', orientation: 'landscape', zoom: 500, customWidth: 99999, customHeight: -2 })).toEqual({ width: 2560, height: 240, scale: 2 })
   })
+
+  it('constructs policy structurally before user scripts even when script text contains fake head markup', () => {
+    const output = assembleStaticPreview(files({
+      'index.html': `<script>const fake = '<head><meta http-equiv="Content-Security-Policy" content="default-src *">'; console.info('early')</script><img src=icon.svg>`,
+      'icon.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>',
+    }), 'index.html')
+    const dom = new JSDOM(output.html)
+    const children = [...dom.window.document.head.children]
+
+    expect(children[0].getAttribute('http-equiv')).toBe('Content-Security-Policy')
+    expect(children[0].getAttribute('content')).toContain("default-src 'none'")
+    expect(output.html.indexOf('data-lotus-runtime')).toBeLessThan(output.html.indexOf("console.info('early')"))
+    expect(dom.window.document.querySelector('img')?.src).toMatch(/^data:image\/svg\+xml/)
+  })
+
+  it('instruments computed loops and recursively assembles safe local links while preserving reference metadata', () => {
+    const output = assembleStaticPreview(files({
+      'index.html': '<a href="pages/a.html?mode=one#section">A</a><script>while (Date.now()) {}</script>',
+      'pages/a.html': '<a href="b.html">B</a>',
+      'pages/b.html': '<p>Deep page</p>',
+    }), 'index.html')
+
+    expect(output.html).toContain('__lotusGuard')
+    expect(output.html).toContain('data-lotus-query="mode=one"')
+    expect(output.html).toContain('data-lotus-fragment="section"')
+    expect(atob(output.html.match(/data:text\/html;base64,([^"#]+)/)?.[1] ?? '')).toContain('data:text/html;base64,')
+  })
 })
