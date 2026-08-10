@@ -5,13 +5,21 @@ const mocks = vi.hoisted(() => ({
   select: vi.fn(),
   generateText: vi.fn(),
   get: vi.fn(),
+  getRuntime: vi.fn(),
+  getFileByPath: vi.fn(),
+  updateFile: vi.fn(),
 }))
 
 vi.mock('@/lib/auth', () => ({
   auth: { api: { getSession: vi.fn(async () => ({ user: { id: 'user-a' } })) } },
 }))
 vi.mock('@/lib/db', () => ({ db: { insert: mocks.insert, select: mocks.select } }))
-vi.mock('@/lib/projects', () => ({ createProjectService: vi.fn(() => ({ get: mocks.get })) }))
+vi.mock('@/lib/projects', () => ({ createProjectService: vi.fn(() => ({
+  get: mocks.get,
+  getRuntime: mocks.getRuntime,
+  getFileByPath: mocks.getFileByPath,
+  updateFile: mocks.updateFile,
+})) }))
 vi.mock('ai', () => ({ generateText: mocks.generateText }))
 vi.mock('next/headers', () => ({ headers: vi.fn(async () => new Headers()) }))
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
@@ -33,5 +41,39 @@ describe('inactive project builder guards', () => {
     await expect(runBuild({ projectId: 'project-1', prompt: 'Change it', model: 'Enigma Auto', currentHtml: '<html></html>' })).rejects.toThrow('not active')
     expect(mocks.insert).not.toHaveBeenCalled()
     expect(mocks.generateText).not.toHaveBeenCalled()
+  })
+})
+
+describe('runtime entry build persistence', () => {
+  const entry = { id: 'entry-1', path: 'src/main.html', content: '<main>Renamed entry</main>', encoding: 'utf-8', updatedAt: new Date(100) }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.get.mockResolvedValue({ id: 'project-1', name: 'Active', status: 'active' })
+    mocks.getRuntime.mockResolvedValue({ entryPath: 'src/main.html' })
+    mocks.getFileByPath.mockResolvedValue(entry)
+    mocks.insert.mockReturnValue({ values: vi.fn(async () => undefined) })
+    mocks.generateText.mockResolvedValue({ text: '<!doctype html><html><body>Built</body></html>' })
+    mocks.updateFile.mockResolvedValue({ ...entry, content: '<!doctype html><html><body>Built</body></html>', updatedAt: new Date(200) })
+  })
+
+  it('reads and writes the renamed runtime entry with its captured optimistic version', async () => {
+    await runBuild({ projectId: 'project-1', prompt: 'Change it', model: 'Enigma Auto', currentHtml: '<main>Stale client</main>' })
+
+    expect(mocks.getFileByPath).toHaveBeenCalledWith('user-a', 'project-1', 'src/main.html')
+    expect(mocks.generateText).toHaveBeenCalledWith(expect.objectContaining({ prompt: expect.stringContaining('<main>Renamed entry</main>') }))
+    expect(mocks.updateFile).toHaveBeenCalledWith('user-a', 'project-1', 'entry-1', {
+      content: '<!doctype html><html><body>Built</body></html>',
+      expectedUpdatedAt: entry.updatedAt,
+    })
+  })
+
+  it('rejects a stale generation after a concurrent editor save without a second write or assistant reply', async () => {
+    mocks.updateFile.mockRejectedValue(new Error('This file changed elsewhere.'))
+
+    await expect(runBuild({ projectId: 'project-1', prompt: 'Change it', model: 'Enigma Auto', currentHtml: '<main>Stale client</main>' })).rejects.toThrow('changed elsewhere')
+
+    expect(mocks.updateFile).toHaveBeenCalledTimes(1)
+    expect(mocks.insert).toHaveBeenCalledTimes(1)
   })
 })

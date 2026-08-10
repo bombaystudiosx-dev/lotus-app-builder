@@ -156,6 +156,46 @@ describe('EditorWorkspace keyboard and data-loss boundaries', () => {
     expect(screen.getByText('Open a file to start editing.')).toBeInTheDocument()
   })
 
+  it('moves roving tree focus to a remaining file when the focused file is deleted', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<EditorWorkspace projectId="lotus" files={files} entryPath="index.html" initialFontSize={14} onPreviewChange={vi.fn()} />)
+    const css = screen.getByRole('treeitem', { name: 'styles.css' })
+    fireEvent.click(css)
+    css.focus()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete file' }))
+
+    await waitFor(() => expect(actions.trash).toHaveBeenCalledWith('lotus', 'css'))
+    const remaining = screen.getByRole('treeitem', { name: 'index.html' })
+    expect(remaining).toHaveAttribute('tabindex', '0')
+  })
+
+  it('closes the palette and ignores global editor shortcuts while inactive', async () => {
+    function ActiveHarness() {
+      const [active, setActive] = React.useState(true)
+      return <>
+        <button type="button" onClick={() => setActive((value) => !value)}>Toggle active</button>
+        <div hidden={!active}><EditorWorkspace active={active} projectId="lotus" files={files} entryPath="index.html" initialFontSize={14} onPreviewChange={vi.fn()} /></div>
+      </>
+    }
+    render(<ActiveHarness />)
+    fireEvent.change(screen.getByLabelText('Code editor index.html'), { target: { value: '<main>Dirty</main>' } })
+    fireEvent.click(screen.getByRole('treeitem', { name: 'styles.css' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Close styles.css' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open command palette' }))
+    expect(screen.getByRole('dialog', { name: 'Command palette' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle active' }))
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    fireEvent.keyDown(window, { key: 'p', ctrlKey: true, shiftKey: true })
+    fireEvent.keyDown(window, { key: 't', ctrlKey: true, shiftKey: true })
+
+    expect(actions.update).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'styles.css', hidden: true })).not.toBeInTheDocument()
+  })
+
   it('opens, traps, escapes, and restores focus for the command palette shortcut', async () => {
     render(<EditorWorkspace projectId="lotus" files={files} entryPath="index.html" initialFontSize={14} onPreviewChange={vi.fn()} />)
     const opener = screen.getByRole('button', { name: 'Open command palette' })

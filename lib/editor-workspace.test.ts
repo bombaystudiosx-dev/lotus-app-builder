@@ -113,6 +113,22 @@ describe('editor language and diagnostics', () => {
       expect.objectContaining({ path, severity: 'error', line: expect.any(Number) }),
     ]))
   })
+
+  it('accepts valid regex literals and tag-like strings inside scripts', () => {
+    expect(diagnoseDocument('main.js', 'const matcher = /\\{[a-z]+\\}<tag>/gi; matcher.test("{word}<tag>")')).toEqual([])
+    expect(diagnoseDocument('index.html', '<main><script>const label = "<section>not markup</section>";</script></main>')).toEqual([])
+  })
+
+  it.each([
+    ['main.js', 'const = ;'],
+    ['thing.ts', 'const value: = 1'],
+    ['styles.css', 'main { color red; }'],
+    ['index.html', '<main><section></main>'],
+  ])('reports parser-backed invalid syntax for %s', (path, content) => {
+    expect(diagnoseDocument(path, content)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path, severity: 'error' }),
+    ]))
+  })
 })
 
 describe('local preview composition', () => {
