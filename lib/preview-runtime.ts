@@ -149,11 +149,11 @@ if(typeof HTMLMetaElement!=='undefined'){protectSetter(HTMLMetaElement.prototype
 if(typeof HTMLFormElement!=='undefined'){define(HTMLFormElement.prototype,'submit',deny);define(HTMLFormElement.prototype,'requestSubmit',deny)}
 define(Document.prototype,'write',deny);define(Document.prototype,'writeln',deny);
 Object.defineProperty(window,${JSON.stringify(registryName)},{value:function(){if(registered)return;registered=true;document.querySelectorAll('a[data-lotus-local-page]').forEach(function(anchor){var href=anchor.getAttribute('href');if(href)localPages.set(anchor,href)})},writable:false,configurable:false});
-document.addEventListener('click',function(event){var target=event.target&&event.target.closest&&event.target.closest('a[href]');if(!target)return;var localHref=localPages.get(target),href=target.getAttribute('href')||'';if(localHref){event.preventDefault();if(!event.isTrusted||href!==localHref)return;event.stopImmediatePropagation();event.stopPropagation();send('navigation',{local:true});location.href=localHref;return}if(href.charAt(0)!=='#')event.preventDefault()},true);
+window.addEventListener('click',function(event){var target=event.target&&event.target.closest&&event.target.closest('a[href]');if(!target)return;var localHref=localPages.get(target),href=target.getAttribute('href')||'';if(localHref){event.preventDefault();event.stopImmediatePropagation();event.stopPropagation();if(!event.isTrusted||href!==localHref)return;send('navigation',{local:true});location.href=localHref;return}if(href.charAt(0)!=='#'){event.preventDefault();event.stopImmediatePropagation();event.stopPropagation()}},true);
 ['log','info','warn','error'].forEach(function(level){var original=console[level];console[level]=function(){var args=Array.prototype.slice.call(arguments,0,10).map(clean);send('console',{level:level,args:args});return original.apply(console,arguments)}});
 window.onerror=function(message,source,line,column){send('error',{message:clean(message),source:clean(source||''),line:Number(line)||0,column:Number(column)||0});return false};
 window.addEventListener('unhandledrejection',function(event){send('error',{message:clean(event.reason&&event.reason.message||event.reason||'Unhandled promise rejection'),source:'promise',line:0,column:0})});
-document.addEventListener('submit',function(event){event.preventDefault()});
+window.addEventListener('submit',function(event){event.preventDefault();event.stopImmediatePropagation();event.stopPropagation()},true);
 send('ready',{});
 })();</script>`
 }
