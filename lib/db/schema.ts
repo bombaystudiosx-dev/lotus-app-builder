@@ -31,6 +31,18 @@ export const project = sqliteTable('project', {
   archivedAt: integer('archivedAt', { mode: 'timestamp' }), deletedAt: integer('deletedAt', { mode: 'timestamp' }),
   createdAt: timestamp('createdAt'), updatedAt: timestamp('updatedAt'),
 }, (table) => [index('project_user_updated_at_idx').on(table.userId, table.updatedAt)])
+export const projectFile = sqliteTable('project_file', {
+  id: text('id').primaryKey(), projectId: text('projectId').notNull().references(() => project.id, { onDelete: 'cascade' }),
+  path: text('path').notNull(), content: text('content').notNull(), encoding: text('encoding', { enum: ['utf-8', 'utf-16le'] }).notNull().default('utf-8'),
+  size: integer('size').notNull(), originalPath: text('originalPath'), deletedAt: integer('deletedAt', { mode: 'timestamp' }),
+  createdAt: timestamp('createdAt'), updatedAt: timestamp('updatedAt'),
+}, (table) => [index('project_file_project_updated_at_idx').on(table.projectId, table.updatedAt)])
+export const projectRuntime = sqliteTable('project_runtime', {
+  projectId: text('projectId').primaryKey().references(() => project.id, { onDelete: 'cascade' }),
+  runtime: text('runtime', { enum: ['static', 'react'] }).notNull().default('static'), framework: text('framework').notNull().default('static'),
+  buildTool: text('buildTool'), entryPath: text('entryPath').notNull().default('index.html'), metadata: text('metadata', { mode: 'json' }).$type<Record<string, string>>().notNull().default({}),
+  createdAt: timestamp('createdAt'), updatedAt: timestamp('updatedAt'),
+})
 export const userSettings = sqliteTable('user_settings', {
   userId: text('userId').primaryKey().references(() => user.id, { onDelete: 'cascade' }),
   theme: text('theme', { enum: ['system', 'light', 'dark'] }).notNull().default('system'),
@@ -51,3 +63,5 @@ export type Project = typeof project.$inferSelect
 export type Message = typeof message.$inferSelect
 export type UserSettings = typeof userSettings.$inferSelect
 export type ProjectFiles = Record<string, string>
+export type ProjectFile = typeof projectFile.$inferSelect
+export type ProjectRuntime = typeof projectRuntime.$inferSelect

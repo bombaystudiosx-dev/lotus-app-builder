@@ -75,4 +75,17 @@ describe('normalized project files', () => {
 
     await expect(projects.restoreFile('user-a', created.id, original.id)).rejects.toThrow('already exists')
   })
+
+  it('enforces the project quota without writing a partial fifth file', async () => {
+    const projects = setup()
+    const created = await projects.createBlank('user-a')
+    const megabyte = 'x'.repeat(1_048_576)
+
+    for (let number = 0; number < 4; number += 1) {
+      await projects.createFile('user-a', created.id, { path: `large/${number}.txt`, content: megabyte })
+    }
+
+    await expect(projects.createFile('user-a', created.id, { path: 'large/overflow.txt', content: megabyte })).rejects.toThrow('Project size limit exceeded')
+    await expect(projects.getFileByPath('user-a', created.id, 'large/overflow.txt')).resolves.toBeNull()
+  })
 })

@@ -2,7 +2,7 @@
 
 import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
-import { project, message } from '@/lib/db/schema'
+import { message } from '@/lib/db/schema'
 import { and, asc, eq } from 'drizzle-orm'
 import { headers } from 'next/headers'
 import { revalidatePath } from 'next/cache'
@@ -136,11 +136,11 @@ export async function getWorkspace(projectId: string): Promise<Workspace | null>
     .where(and(eq(message.projectId, proj.id), eq(message.userId, userId)))
     .orderBy(asc(message.createdAt))
 
-  const files = (proj.files as Record<string, string>) || {}
+  const index = await projects.getFileByPath(userId, proj.id, 'index.html')
   return {
     projectId: proj.id,
     name: redactSensitiveValues(proj.name),
-    html: files['index.html'] ? redactSensitiveValues(files['index.html']) : null,
+    html: index ? redactSensitiveValues(index.content) : null,
     messages: rows.map((r) => ({
       id: r.id,
       role: r.role as 'user' | 'assistant',
@@ -202,24 +202,14 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
 
   // Ensure a project exists (scoped to this user).
   let projectId = input.projectId
-  if (projectId) {
-    const [owned] = await db
-      .select({ id: project.id })
-      .from(project)
-      .where(and(eq(project.id, projectId), eq(project.userId, userId)))
-      .limit(1)
-    if (!owned) projectId = null
-  }
+  if (projectId && !await projects.get(userId, projectId)) throw new Error('Project not found.')
   let projectName = deriveName(safePrompt)
   if (!projectId) {
-    projectId = id()
-    await db.insert(project).values({ id: projectId, userId, name: projectName, mode: 'html', files: {} })
+    const created = await projects.createBlank(userId, projectName)
+    projectId = created.id
+    projectName = created.name
   } else {
-    const [existing] = await db
-      .select({ name: project.name })
-      .from(project)
-      .where(and(eq(project.id, projectId), eq(project.userId, userId)))
-      .limit(1)
+    const existing = await projects.get(userId, projectId)
     if (existing) projectName = existing.name
   }
 
@@ -262,10 +252,9 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
     : 'Here is your app. It is rendering live in the preview — describe any change to refine it.'
 
   // Persist the generated app + assistant reply.
-  await db
-    .update(project)
-    .set({ files: { 'index.html': html }, updatedAt: new Date() })
-    .where(and(eq(project.id, projectId), eq(project.userId, userId)))
+  const index = await projects.getFileByPath(userId, projectId, 'index.html')
+  if (!index) throw new Error('Project starter file is unavailable.')
+  await projects.updateFile(userId, projectId, index.id, { content: html })
 
   await db.insert(message).values({
     id: id(),
