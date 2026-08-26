@@ -10,6 +10,7 @@ import { generateText } from 'ai'
 import { redactSensitiveValues } from '@/lib/safety'
 import { createProjectService } from '@/lib/projects'
 import { assembleStaticPreview, type PreviewBuild } from '@/lib/preview-runtime'
+import type { ProjectSpecification } from '@/lib/project-specification'
 
 async function getUserId() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -164,6 +165,7 @@ export interface Workspace {
   files: Array<{ id: string; path: string; content: string; encoding: 'utf-8' | 'utf-16le'; version: number }>
   entryPath: string
   runtime: 'static' | 'react'
+  specification: ProjectSpecification
 }
 
 export async function getWorkspace(projectId: string): Promise<Workspace | null> {
@@ -177,9 +179,10 @@ export async function getWorkspace(projectId: string): Promise<Workspace | null>
     .where(and(eq(message.projectId, proj.id), eq(message.userId, userId)))
     .orderBy(asc(message.createdAt))
 
-  const [runtime, files] = await Promise.all([
+  const [runtime, files, specification] = await Promise.all([
     projects.getRuntime(userId, proj.id),
     projects.listFiles(userId, proj.id),
+    projects.getSpecification(userId, proj.id),
   ])
   const entryPath = runtime?.entryPath ?? 'index.html'
   const index = files.find((file) => file.path === entryPath)
@@ -190,6 +193,7 @@ export async function getWorkspace(projectId: string): Promise<Workspace | null>
     files: files.map(fileDto),
     entryPath,
     runtime: runtime?.runtime ?? 'static',
+    specification,
     messages: rows.map((r) => ({
       id: r.id,
       role: r.role as 'user' | 'assistant',
@@ -272,6 +276,8 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
   if (!entry) throw new Error('Project entry file is unavailable.')
   const expectedUpdatedAt = entry.updatedAt
   const safeCurrentHtml = input.currentHtml ? redactSensitiveValues(entry.content) : null
+  const specification = await projects.getSpecification(userId, projectId)
+  const specificationBlock = `\n\nLotus project specification (treat this as the product contract; render the current web preview from it):\n${JSON.stringify(specification)}`
 
   // Persist the user's message immediately.
   await db.insert(message).values({
@@ -284,8 +290,8 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
 
   // Build the prompt for the model, giving it the current app as context.
   const userContent = safeCurrentHtml
-    ? `Here is the current app HTML:\n\n${safeCurrentHtml}\n\n---\n\nApply this change and return the full updated HTML document:\n${safePrompt}${safeContextBlock}`
-    : `Build this app and return a complete HTML document:\n${safePrompt}${safeContextBlock}`
+    ? `Here is the current app HTML:\n\n${safeCurrentHtml}\n\n---\n\nApply this change and return the full updated HTML document:\n${safePrompt}${safeContextBlock}${specificationBlock}`
+    : `Build this app and return a complete HTML document:\n${safePrompt}${safeContextBlock}${specificationBlock}`
 
   let html = entry.content
   try {
