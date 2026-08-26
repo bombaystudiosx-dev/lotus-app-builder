@@ -277,7 +277,8 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
   const expectedUpdatedAt = entry.updatedAt
   const safeCurrentHtml = input.currentHtml ? redactSensitiveValues(entry.content) : null
   const specification = await projects.getSpecification(userId, projectId)
-  const specificationBlock = `\n\nLotus project specification (treat this as the product contract; render the current web preview from it):\n${JSON.stringify(specification)}`
+  const safeSpecification = redactSensitiveValues(JSON.stringify(specification))
+  const specificationBlock = `\n\nLotus project specification (treat this as the product contract; render the current web preview from it):\n${safeSpecification}`
 
   // Persist the user's message immediately.
   await db.insert(message).values({
