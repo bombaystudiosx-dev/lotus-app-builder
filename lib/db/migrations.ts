@@ -221,9 +221,10 @@ function backfillProjectSpecifications(sqlite: Database.Database) {
   const insert = sqlite.prepare(`INSERT INTO project_specification (projectId, specification, createdAt, updatedAt)
     VALUES (?, ?, ?, ?)`)
   for (const project of projects) {
+    const name = project.name.trim().replace(/\s+/g, ' ').slice(0, 100) || 'Untitled project'
     const specification = createProjectSpecification({
-      name: project.name,
-      prompt: `Build ${project.name}`,
+      name,
+      prompt: `Build ${name}`,
       targets: ['web'],
     })
     insert.run(project.id, JSON.stringify(specification), project.createdAt, project.updatedAt)

@@ -120,6 +120,12 @@ function validateReferences(specification: ProjectSpecification) {
   assertUniqueIds(specification.workflows, 'workflow')
   assertUniqueIds(specification.integrations, 'integration')
 
+  const routes = new Set<string>()
+  for (const screen of specification.screens) {
+    if (routes.has(screen.route)) throw new ProjectSpecificationError(`Duplicate screen route: ${screen.route}.`)
+    routes.add(screen.route)
+  }
+
   const screenIds = new Set(specification.screens.map(({ id }) => id))
   const entityIds = new Set(specification.data.entities.map(({ id }) => id))
   const roleIds = new Set(specification.access.roles.map(({ id }) => id))
