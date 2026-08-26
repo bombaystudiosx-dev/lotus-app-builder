@@ -241,7 +241,7 @@ export interface RunBuildResult {
 
 // Derive a short, human title for a project from the first prompt.
 function deriveName(prompt: string): string {
-  const cleaned = prompt.replace(/^(build|make|create|generate|design)\s+(me\s+)?(a|an|the)?\s*/i, '').trim()
+  const cleaned = prompt.replace(/^(build|make|create|generate|design)\s+(?:me\s+)?(?:(?:an|a|the)\s+)?/i, '').trim()
   const words = cleaned.split(/\s+/).slice(0, 5).join(' ')
   const base = (words || prompt).slice(0, 48)
   return base.charAt(0).toUpperCase() + base.slice(1)
@@ -257,7 +257,7 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
   let projectId = input.projectId
   const existingProject = projectId ? await projects.get(userId, projectId) : null
   if (projectId && !existingProject) throw new Error('Project not found.')
-  if (existingProject?.status !== 'active') throw new Error('Project is not active.')
+  if (existingProject && existingProject.status !== 'active') throw new Error('Project is not active.')
   let projectName = deriveName(safePrompt)
   if (!projectId) {
     const created = await projects.createBlank(userId, projectName)
