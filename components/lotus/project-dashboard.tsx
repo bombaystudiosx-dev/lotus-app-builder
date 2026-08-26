@@ -90,7 +90,7 @@ export function ProjectDashboard({ initialProjects, initialSettings, userName }:
               <Settings size={18} />
             </button>
             <div className="relative">
-              <button type="button" onClick={() => setAccountOpen((open) => !open)} aria-expanded={accountOpen} aria-controls="account-menu" className="rounded-full bg-primary px-3 py-2 text-sm font-medium text-primary-foreground focus-visible:outline-2" aria-label={`Open account menu for ${userName}`}>
+              <button type="button" onClick={() => setAccountOpen((open) => !open)} aria-expanded={accountOpen} aria-controls="account-menu" className="rounded-full bg-primary px-3 py-2 text-sm font-medium text-primary-foreground focus-visible:outline-2" aria-label={`Open workspace menu for ${userName}`}>
                 {userName.trim().charAt(0).toUpperCase() || 'U'}
               </button>
               {accountOpen && <div id="account-menu" className="absolute right-0 z-10 mt-2 w-48 rounded-lg border border-border bg-popover p-2 shadow-lg">
@@ -118,7 +118,7 @@ export function ProjectDashboard({ initialProjects, initialSettings, userName }:
         {firstRun ? <section className="mt-8 rounded-2xl border border-border bg-card p-8 text-center sm:p-12">
           <p className="text-sm font-medium text-accent">Welcome to Lotus</p>
           <h2 className="mt-2 font-serif text-3xl">Start with a blank project</h2>
-          <p className="mx-auto mt-3 max-w-xl text-muted-foreground">Create a local project, then build and preview it in the workspace. Your projects stay private to your account.</p>
+          <p className="mx-auto mt-3 max-w-xl text-muted-foreground">Create a project, then build and preview it in the shared public workspace.</p>
           <button type="button" onClick={createProject} disabled={pending} className="mt-6 rounded-lg bg-primary px-4 py-2.5 font-medium text-primary-foreground disabled:opacity-60">Create your first project</button>
         </section> : <>
           <ProjectSection title="Active projects" projects={active} empty="No active projects yet." pending={pending} onError={setError} onChanged={() => router.refresh()} />
@@ -128,7 +128,7 @@ export function ProjectDashboard({ initialProjects, initialSettings, userName }:
 
         {settingsOpen && <section id="project-settings" aria-label="Project settings" className="mt-8 max-w-xl rounded-xl border border-border bg-card p-5">
           <h2 className="font-serif text-2xl">Settings</h2>
-          <p className="mt-1 text-sm text-muted-foreground">These preferences are saved to your account.</p>
+          <p className="mt-1 text-sm text-muted-foreground">These preferences are saved for the public workspace.</p>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <SettingSelect label="Theme" value={settings.theme} disabled={pending} onChange={(value) => updatePreference('theme', value as DashboardSettings['theme'])} options={[['system', 'System'], ['light', 'Light'], ['dark', 'Dark']]} />
             <SettingSelect label="Editor font size" value={String(settings.editorFontSize)} disabled={pending} onChange={(value) => updatePreference('editorFontSize', Number(value))} options={[["12", "12 px"], ["14", "14 px"], ["16", "16 px"], ["18", "18 px"], ["20", "20 px"], ["24", "24 px"]]} />

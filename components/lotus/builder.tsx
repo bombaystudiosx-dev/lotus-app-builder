@@ -634,7 +634,7 @@ export default function App({ initial }: LotusBuilderProps) {
             <button
               type="button"
               onClick={()=>setShowAccount(open=>!open)}
-              aria-label={`Open account menu for ${initial.userName}`}
+              aria-label={`Open workspace menu for ${initial.userName}`}
               aria-haspopup="menu"
               aria-expanded={showAccount}
               className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold transition-all hover:opacity-80"
