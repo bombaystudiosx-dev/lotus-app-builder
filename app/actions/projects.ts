@@ -263,7 +263,7 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
     const created = await projects.createBlank(userId, projectName)
     projectId = created.id
     projectName = created.name
-  } else {
+  } else if (existingProject) {
     projectName = existingProject.name
   }
 

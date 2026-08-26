@@ -171,6 +171,21 @@ describe('EditorWorkspace keyboard and data-loss boundaries', () => {
     expect(screen.getByText('Open a file to start editing.')).toBeInTheDocument()
   })
 
+  it('falls back safely when persisted editor state is malformed', () => {
+    localStorage.setItem('lotus:editor:lotus', '{malformed')
+    render(<EditorWorkspace projectId="lotus" files={files} entryPath="index.html" initialFontSize={14} onPreviewChange={vi.fn()} />)
+
+    expect(screen.getByRole('tab', { name: 'index.html' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Code editor index.html')).toHaveValue('<main>Hello</main>')
+  })
+
+  it('opens a plain JavaScript file with the non-JSX language mode', () => {
+    const javascriptFiles = [{ id: 'js', path: 'main.js', content: 'const ready = true', encoding: 'utf-8' as const }]
+    render(<EditorWorkspace projectId="lotus" files={javascriptFiles} entryPath="main.js" initialFontSize={14} onPreviewChange={vi.fn()} />)
+
+    expect(screen.getByLabelText('Code editor main.js')).toHaveValue('const ready = true')
+  })
+
   it('moves roving tree focus to a remaining file when the focused file is deleted', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<EditorWorkspace projectId="lotus" files={files} entryPath="index.html" initialFontSize={14} onPreviewChange={vi.fn()} />)
@@ -335,5 +350,29 @@ describe('EditorWorkspace keyboard and data-loss boundaries', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open command palette' }))
     fireEvent.mouseDown(screen.getByRole('dialog', { name: 'Command palette' }).parentElement as HTMLElement)
     expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the workspace usable when file operations fail', async () => {
+    vi.spyOn(window, 'prompt').mockReturnValue('new.txt')
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    actions.update.mockRejectedValueOnce(new Error('Save unavailable'))
+    actions.create.mockRejectedValueOnce('Create unavailable')
+    actions.rename.mockRejectedValueOnce(new Error('Rename unavailable'))
+    actions.trash.mockRejectedValueOnce('Delete unavailable')
+    render(<EditorWorkspace projectId="lotus" files={files} entryPath="index.html" initialFontSize={14} onPreviewChange={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('Code editor index.html'), { target: { value: '<main>Still local</main>' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save file' }))
+    await waitFor(() => expect(actions.update).toHaveBeenCalled())
+    expect(screen.getByLabelText('Code editor index.html')).toHaveValue('<main>Still local</main>')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create file' }))
+    await waitFor(() => expect(actions.create).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
+    await waitFor(() => expect(actions.rename).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Delete file' }))
+    await waitFor(() => expect(actions.trash).toHaveBeenCalled())
+
+    expect(screen.getByRole('treeitem', { name: 'index.html' })).toBeInTheDocument()
   })
 })
