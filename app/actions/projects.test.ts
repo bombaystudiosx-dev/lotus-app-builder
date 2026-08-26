@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   generateText: vi.fn(),
   get: vi.fn(),
   getRuntime: vi.fn(),
+  getSpecification: vi.fn(),
   getFileByPath: vi.fn(),
   updateFile: vi.fn(),
 }))
@@ -17,6 +18,7 @@ vi.mock('@/lib/db', () => ({ db: { insert: mocks.insert, select: mocks.select } 
 vi.mock('@/lib/projects', () => ({ createProjectService: vi.fn(() => ({
   get: mocks.get,
   getRuntime: mocks.getRuntime,
+  getSpecification: mocks.getSpecification,
   getFileByPath: mocks.getFileByPath,
   updateFile: mocks.updateFile,
 })) }))
@@ -51,6 +53,16 @@ describe('runtime entry build persistence', () => {
     vi.clearAllMocks()
     mocks.get.mockResolvedValue({ id: 'project-1', name: 'Active', status: 'active' })
     mocks.getRuntime.mockResolvedValue({ entryPath: 'src/main.html' })
+    mocks.getSpecification.mockResolvedValue({
+      version: 1,
+      product: { name: 'Active', description: 'Build dispatch software', kind: 'application' },
+      targets: [{ platform: 'web', framework: 'nextjs', enabled: true }],
+      screens: [{ id: 'home', name: 'Home', route: '/', kind: 'page', access: [] }],
+      data: { entities: [] },
+      access: { roles: [{ id: 'owner', name: 'Owner' }], permissions: [] },
+      workflows: [],
+      integrations: [],
+    })
     mocks.getFileByPath.mockResolvedValue(entry)
     mocks.insert.mockReturnValue({ values: vi.fn(async () => undefined) })
     mocks.generateText.mockResolvedValue({ text: '<!doctype html><html><body>Built</body></html>' })
@@ -62,6 +74,7 @@ describe('runtime entry build persistence', () => {
 
     expect(mocks.getFileByPath).toHaveBeenCalledWith('user-a', 'project-1', 'src/main.html')
     expect(mocks.generateText).toHaveBeenCalledWith(expect.objectContaining({ prompt: expect.stringContaining('<main>Renamed entry</main>') }))
+    expect(mocks.generateText).toHaveBeenCalledWith(expect.objectContaining({ prompt: expect.stringContaining('"platform":"web"') }))
     expect(mocks.updateFile).toHaveBeenCalledWith('user-a', 'project-1', 'entry-1', {
       content: '<!doctype html><html><body>Built</body></html>',
       expectedUpdatedAt: entry.updatedAt,
