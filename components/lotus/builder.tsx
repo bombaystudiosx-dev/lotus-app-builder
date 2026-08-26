@@ -159,12 +159,47 @@ async function copyGeneratedAppSource(html: string | null) {
   }
 }
 
-function EmptyPreview() {
+export function EmptyPreview() {
   return (
-    <div className="h-full w-full flex flex-col items-center justify-center gap-2 px-8 text-center" style={{ background:"var(--background)" }}>
-      <Sparkles size={22} style={{ color:"var(--accent)" }}/>
-      <p className="text-sm font-semibold" style={{ color:"var(--foreground)" }}>Your app will appear here</p>
-      <p className="text-xs leading-relaxed" style={{ color:"var(--muted-foreground)" }}>Describe what you want to build in the chat.</p>
+    <div
+      className="h-full w-full overflow-auto p-5 sm:p-8"
+      style={{
+        background:
+          "radial-gradient(circle at 50% 12%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 42%), var(--muted)",
+      }}
+    >
+      <div className="flex min-h-full items-center justify-center">
+        <section
+          aria-label="Phone preview screen"
+          className="relative flex h-[min(640px,calc(100vh-190px))] min-h-[440px] w-[min(312px,calc(100vw-3rem))] shrink-0 flex-col overflow-hidden rounded-[2.6rem] border-[7px] shadow-[0_24px_70px_rgba(30,18,6,0.22)]"
+          style={{ background:"var(--card)", borderColor:"var(--foreground)" }}
+        >
+          <div className="absolute left-1/2 top-2 z-10 h-6 w-24 -translate-x-1/2 rounded-full" style={{ background:"var(--foreground)" }} />
+          <div className="flex items-center justify-between px-6 pb-3 pt-4 text-[10px] font-semibold" style={{ color:"var(--foreground)" }} aria-hidden="true">
+            <span>9:41</span>
+            <span className="tracking-widest">● ◒ ▰</span>
+          </div>
+          <div className="mx-3 flex items-center gap-2 rounded-2xl border px-3 py-2" style={{ background:"var(--background)", borderColor:"var(--border)" }}>
+            <div className="flex h-7 w-7 items-center justify-center rounded-xl" style={{ background:"color-mix(in srgb, var(--accent) 14%, transparent)" }}>
+              <Sparkles size={13} style={{ color:"var(--accent)" }}/>
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[11px] font-semibold" style={{ color:"var(--foreground)" }}>Untitled app</p>
+              <p className="text-[9px]" style={{ color:"var(--muted-foreground)" }}>Live preview</p>
+            </div>
+          </div>
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl" style={{ background:"color-mix(in srgb, var(--accent) 14%, transparent)", border:"1px solid color-mix(in srgb, var(--accent) 24%, transparent)" }}>
+              <Sparkles size={21} style={{ color:"var(--accent)" }}/>
+            </div>
+            <div>
+              <p className="text-sm font-semibold" style={{ color:"var(--foreground)" }}>Start building</p>
+              <p className="mt-1 text-xs leading-relaxed" style={{ color:"var(--muted-foreground)" }}>Describe what you want to build in the chat.</p>
+            </div>
+          </div>
+          <div className="mx-auto mb-2 h-1 w-24 rounded-full" style={{ background:"var(--foreground)", opacity:0.7 }} aria-hidden="true" />
+        </section>
+      </div>
     </div>
   );
 }
