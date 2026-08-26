@@ -79,6 +79,7 @@ import {
   restoreProjectAction,
   restoreProjectFileAction,
   runBuild,
+  runBuildAction,
   softDeleteProjectAction,
   trashProjectFileAction,
   updateProjectFileAction,
@@ -313,6 +314,23 @@ describe('generation errors and initial builds', () => {
     await expect(runBuild({ projectId: 'project-1', prompt: 'Build', model: 'GPT-4.1', currentHtml: null })).rejects.toThrow('credit card')
     mocks.generateText.mockRejectedValueOnce('offline')
     await expect(runBuild({ projectId: 'project-1', prompt: 'Build', model: 'GPT-4.1', currentHtml: null })).rejects.toThrow('Generation failed')
+  })
+
+  it('recovers a project lost between Vercel instances without returning a React server error', async () => {
+    const result = await runBuildAction({ projectId: 'missing', prompt: 'Build a website generator', model: 'Enigma Auto', currentHtml: null })
+
+    expect(result).toMatchObject({ ok: true, data: { projectId: 'created-1' } })
+    expect(mocks.createBlank).toHaveBeenCalled()
+  })
+
+  it('returns a safe serializable build error instead of throwing through React Server Components', async () => {
+    mocks.get.mockResolvedValue({ id: 'project-1', name: 'Active', status: 'active' })
+    mocks.generateText.mockRejectedValue(new Error('provider secret details'))
+
+    await expect(runBuildAction({ projectId: 'project-1', prompt: 'Build', model: 'GPT-4.1', currentHtml: null })).resolves.toEqual({
+      ok: false,
+      error: 'Generation failed. Check your server-side AI provider configuration and try again.',
+    })
   })
 })
 

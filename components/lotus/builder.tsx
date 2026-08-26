@@ -12,7 +12,7 @@ import {
 import { PreviewWorkbench } from "@/components/lotus/preview-workbench";
 import { EditorWorkspace } from "@/components/lotus/editor-workspace";
 import { type EditorFile } from "@/lib/editor-workspace";
-import { buildProjectPreviewAction, runBuild, type WorkspaceMessage } from "@/app/actions/projects";
+import { buildProjectPreviewAction, runBuildAction, type WorkspaceMessage } from "@/app/actions/projects";
 import { toast } from "sonner";
 import { redactSensitiveValues } from "@/lib/safety";
 import Image from "next/image";
@@ -555,7 +555,7 @@ export default function App({ initial }: LotusBuilderProps) {
     setIsTyping(true);
     setAutosaved(false);
     try {
-      const res = await runBuild({
+      const result = await runBuildAction({
         projectId,
         prompt: text,
         model: selectedModel,
@@ -568,6 +568,11 @@ export default function App({ initial }: LotusBuilderProps) {
           attachments:  uploadedFiles.map(f=>f.name),
         },
       });
+      if (!result.ok) {
+        setMessages(p=>[...p,{ id:(Date.now()+1).toString(), role:"assistant", content:result.error, ts:new Date() }]);
+        return;
+      }
+      const res = result.data;
       setProjectId(res.projectId);
       setProjectName(res.name);
       const nextFiles = builderFiles.map(file => file.path === entryPath ? { ...file, content: res.html, version: res.version } : file);

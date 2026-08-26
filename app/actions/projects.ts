@@ -236,6 +236,10 @@ export interface RunBuildResult {
   version: number
 }
 
+export type RunBuildActionResult =
+  | { ok: true; data: RunBuildResult }
+  | { ok: false; error: string }
+
 // Derive a short, human title for a project from the first prompt.
 function deriveName(prompt: string): string {
   const cleaned = prompt.replace(/^(build|make|create|generate|design)\s+(?:me\s+)?(?:(?:an|a|the)\s+)?/i, '').trim()
@@ -327,6 +331,31 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
   })
 
   return { projectId, name: projectName, html, reply, version: updatedEntry.updatedAt.getTime() }
+}
+
+export async function runBuildAction(input: RunBuildInput): Promise<RunBuildActionResult> {
+  try {
+    return { ok: true, data: await runBuild(input) }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+    if (input.projectId && message === 'Project not found.') {
+      try {
+        return { ok: true, data: await runBuild({ ...input, projectId: null }) }
+      } catch (retryError) {
+        const retryMessage = retryError instanceof Error ? retryError.message : ''
+        return { ok: false, error: publicBuildError(retryMessage) }
+      }
+    }
+    return { ok: false, error: publicBuildError(message) }
+  }
+}
+
+function publicBuildError(message: string) {
+  if (/credit card|AI generation is not enabled/i.test(message)) return message
+  if (/changed elsewhere/i.test(message)) return 'This project changed while Lotus was building. Please try your request again.'
+  if (/Generation failed/i.test(message)) return message
+  if (/not active/i.test(message)) return 'This project is not active. Restore it before building.'
+  return 'Lotus could not complete this build. Please try again.'
 }
 
 export async function buildProjectPreviewAction(projectId: string, revision = 0, sessionId = 'default'): Promise<PreviewBuild> {
