@@ -127,8 +127,17 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
     </div>
 
     <div className="min-h-0 flex-1 overflow-auto bg-[radial-gradient(circle,rgba(44,34,20,0.08)_1px,transparent_1px)] bg-[length:22px_22px] p-6">
-      <div className="relative mx-auto origin-top-left shadow-2xl" style={{ width: viewport.width, height: viewport.height, transform: `scale(${viewport.scale})`, marginBottom: viewport.height * (viewport.scale - 1), marginRight: viewport.width * (viewport.scale - 1) }}>
+      <div
+        role={device === 'phone' ? 'region' : undefined}
+        aria-label={device === 'phone' ? 'Phone preview screen' : undefined}
+        className={`relative mx-auto origin-top-left shadow-2xl ${device === 'phone' ? 'overflow-hidden rounded-[2.75rem] border-[10px] border-[#17120d] bg-[#17120d]' : ''}`}
+        style={{ width: viewport.width, height: viewport.height, boxSizing: 'content-box', transform: `scale(${viewport.scale})`, marginBottom: viewport.height * (viewport.scale - 1), marginRight: viewport.width * (viewport.scale - 1) }}
+      >
         <LivePreview ref={frameRef} html={displayHtml} revision={revision}/>
+        {device === 'phone' && <>
+          <div aria-hidden="true" className="pointer-events-none absolute left-1/2 top-2 z-20 h-7 w-28 -translate-x-1/2 rounded-full bg-[#17120d]" />
+          <div aria-hidden="true" className="pointer-events-none absolute bottom-2 left-1/2 z-20 h-1.5 w-28 -translate-x-1/2 rounded-full bg-[#17120d]/80" />
+        </>}
         {(runtimeError || diagnostics.some((item) => item.severity === 'error')) && <div role="alert" className="absolute inset-x-4 top-4 z-10 rounded-lg border border-red-400/40 bg-red-950/95 p-3 text-xs text-red-100 shadow-xl">
           <p className="font-semibold">Preview could not run</p>
           {runtimeError && <p>{runtimeError.message}{runtimeError.source ? ` · ${runtimeError.source}:${runtimeError.line ?? 0}:${runtimeError.column ?? 0}` : ''}</p>}

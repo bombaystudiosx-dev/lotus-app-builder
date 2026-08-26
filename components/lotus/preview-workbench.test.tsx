@@ -8,6 +8,14 @@ import { PreviewWorkbench } from '@/components/lotus/preview-workbench'
 afterEach(() => cleanup())
 
 describe('PreviewWorkbench', () => {
+  it('renders the phone viewport inside a visible device frame', () => {
+    render(<PreviewWorkbench html="<h1>Start building</h1>" initialDevice="phone" />)
+
+    const phone = screen.getByRole('region', { name: 'Phone preview screen' })
+    expect(phone).toBeInTheDocument()
+    expect(phone).toContainElement(screen.getByTitle('App preview'))
+  })
+
   it('provides working device, orientation, zoom, and bounded custom viewport controls', () => {
     render(<PreviewWorkbench html="<h1>Ready</h1>" initialDevice="phone" />)
 
