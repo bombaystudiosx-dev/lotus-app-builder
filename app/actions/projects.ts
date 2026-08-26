@@ -1,21 +1,18 @@
 'use server'
 
-import { auth } from '@/lib/auth'
-import { db } from '@/lib/db'
+import { db, sqlite } from '@/lib/db'
 import { message } from '@/lib/db/schema'
 import { and, asc, eq } from 'drizzle-orm'
-import { headers } from 'next/headers'
 import { revalidatePath } from 'next/cache'
 import { generateText } from 'ai'
 import { redactSensitiveValues } from '@/lib/safety'
 import { createProjectService } from '@/lib/projects'
 import { assembleStaticPreview, type PreviewBuild } from '@/lib/preview-runtime'
 import type { ProjectSpecification } from '@/lib/project-specification'
+import { ensureGuestWorkspace } from '@/lib/guest-workspace'
 
 async function getUserId() {
-  const session = await auth.api.getSession({ headers: await headers() })
-  if (!session?.user) throw new Error('Unauthorized')
-  return session.user.id
+  return ensureGuestWorkspace(sqlite)
 }
 
 function id() {

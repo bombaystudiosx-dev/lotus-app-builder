@@ -28,12 +28,14 @@ const mocks = vi.hoisted(() => ({
   updateFile: vi.fn(),
   trashFile: vi.fn(),
   restoreFile: vi.fn(),
+  guestUser: vi.fn(),
 }))
 
 vi.mock('@/lib/auth', () => ({
   auth: { api: { getSession: mocks.session } },
 }))
-vi.mock('@/lib/db', () => ({ db: { insert: mocks.insert, select: mocks.select } }))
+vi.mock('@/lib/db', () => ({ db: { insert: mocks.insert, select: mocks.select }, sqlite: {} }))
+vi.mock('@/lib/guest-workspace', () => ({ ensureGuestWorkspace: mocks.guestUser }))
 vi.mock('@/lib/projects', () => ({ createProjectService: vi.fn(() => ({
   listDashboard: mocks.listDashboard,
   getSettings: mocks.getSettings,
@@ -96,6 +98,7 @@ const specification = {
 
 beforeEach(() => {
   mocks.session.mockResolvedValue({ user: { id: 'user-a' } })
+  mocks.guestUser.mockReturnValue('user-a')
 })
 
 describe('inactive project builder guards', () => {
@@ -208,11 +211,12 @@ describe('authenticated project and file actions', () => {
     await expect(renameProjectFileAction('project-1', 'file-1', 'src/index.html')).resolves.toMatchObject({ entryPath: 'index.html' })
   })
 
-  it('rejects every action when the session is missing', async () => {
+  it('uses the public guest workspace when the session is missing', async () => {
     mocks.session.mockResolvedValue(null)
+    mocks.getSettings.mockResolvedValue({ theme: 'system' })
 
-    await expect(getUserSettings()).rejects.toThrow('Unauthorized')
-    expect(mocks.getSettings).not.toHaveBeenCalled()
+    await expect(getUserSettings()).resolves.toEqual({ theme: 'system' })
+    expect(mocks.getSettings).toHaveBeenCalledWith('user-a')
   })
 })
 

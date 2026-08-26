@@ -1,13 +1,8 @@
-import { headers } from 'next/headers'
-import { notFound, redirect } from 'next/navigation'
-import { auth } from '@/lib/auth'
+import { notFound } from 'next/navigation'
 import { getUserSettings, getWorkspace } from '@/app/actions/projects'
 import LotusBuilder from '@/components/lotus/builder'
 
 export default async function ProjectPage({ params }: { params: Promise<{ projectId: string }> }) {
-  const session = await auth.api.getSession({ headers: await headers() })
-  if (!session?.user) redirect('/sign-in')
-
   const { projectId } = await params
   const [workspace, settings] = await Promise.all([getWorkspace(projectId), getUserSettings()])
   if (!workspace) notFound()
@@ -18,7 +13,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
       name: workspace.name,
       html: workspace.html,
       messages: workspace.messages,
-      userName: session.user.name || session.user.email || 'You',
+      userName: 'Guest',
       editorFontSize: settings.editorFontSize,
       defaultDevice: settings.defaultDevice,
       theme: settings.theme,

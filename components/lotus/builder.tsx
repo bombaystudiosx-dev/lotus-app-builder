@@ -8,17 +8,14 @@ import {
   Plus, Upload, FileText, Brain, Bot, Cpu, Undo2, Redo2,
   Download, Copy, Eye, Check, RotateCcw,
   Plug,
-  LogOut,
 } from "lucide-react";
 import { PreviewWorkbench } from "@/components/lotus/preview-workbench";
 import { EditorWorkspace } from "@/components/lotus/editor-workspace";
 import { type EditorFile } from "@/lib/editor-workspace";
 import { buildProjectPreviewAction, runBuild, type WorkspaceMessage } from "@/app/actions/projects";
-import { authClient } from "@/lib/auth-client";
 import { toast } from "sonner";
 import { redactSensitiveValues } from "@/lib/safety";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
 import { useResolvedTheme } from "@/components/lotus/use-resolved-theme";
 import { assembleStaticPreview, type PreviewDiagnostic } from "@/lib/preview-runtime";
 
@@ -411,7 +408,6 @@ interface LotusBuilderProps {
 }
 
 export default function App({ initial }: LotusBuilderProps) {
-  const router = useRouter();
   const resolvedTheme = useResolvedTheme(initial.theme);
   const initialMessages: ChatMessage[] = initial.messages.length
     ? initial.messages.map((m) => ({ id: m.id, role: m.role, content: m.content, ts: new Date(m.ts) }))
@@ -656,16 +652,8 @@ export default function App({ initial }: LotusBuilderProps) {
                   style={{ background:"var(--card)", border:"1px solid var(--border)", boxShadow:"0 8px 32px rgba(0,0,0,0.13)" }}>
                   <div className="px-3 py-2 border-b" style={{ borderColor:"var(--border)" }}>
                     <p className="text-xs font-semibold truncate" style={{ color:"var(--foreground)" }}>{initial.userName}</p>
-                    <p className="text-[10px]" style={{ color:"var(--muted-foreground)" }}>Signed in</p>
+                    <p className="text-[10px]" style={{ color:"var(--muted-foreground)" }}>Public workspace</p>
                   </div>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={async ()=>{ await authClient.signOut(); router.push("/sign-in"); }}
-                    className="mt-1 w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-left transition-colors hover:bg-[var(--muted)]"
-                    style={{ color:"var(--destructive)" }}>
-                    <LogOut size={13}/> Sign out
-                  </button>
                 </motion.div>
               )}
             </AnimatePresence>

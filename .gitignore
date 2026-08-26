@@ -21,3 +21,5 @@ CLAUDE.md
 .worktrees/
 .superpowers/
 .DS_Store
+.vercel
+.env*.local

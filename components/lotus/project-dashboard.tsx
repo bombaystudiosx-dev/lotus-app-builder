@@ -15,7 +15,6 @@ import {
   softDeleteProjectAction,
   updateSettingsAction,
 } from '@/app/actions/projects'
-import { authClient } from '@/lib/auth-client'
 import { useRouter } from 'next/navigation'
 import { useResolvedTheme } from '@/components/lotus/use-resolved-theme'
 
@@ -96,7 +95,7 @@ export function ProjectDashboard({ initialProjects, initialSettings, userName }:
               </button>
               {accountOpen && <div id="account-menu" className="absolute right-0 z-10 mt-2 w-48 rounded-lg border border-border bg-popover p-2 shadow-lg">
                 <p className="px-2 py-1 text-sm font-medium">{userName}</p>
-                <button type="button" className="w-full rounded px-2 py-2 text-left text-sm hover:bg-muted" onClick={async () => { await authClient.signOut(); router.push('/sign-in'); router.refresh() }}>Sign out</button>
+                <p className="px-2 py-2 text-xs text-muted-foreground">Public workspace</p>
               </div>}
             </div>
           </div>
