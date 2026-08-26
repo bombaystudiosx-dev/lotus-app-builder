@@ -35,6 +35,7 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
   const [device, setDevice] = useState<PreviewDevice>(initialDevice)
   const [orientation, setOrientation] = useState<PreviewOrientation>('portrait')
   const [zoom, setZoom] = useState(75)
+  const [position, setPosition] = useState({ x: 0, y: 0 })
   const [customWidth, setCustomWidth] = useState(390)
   const [customHeight, setCustomHeight] = useState(844)
   const [autoRefresh, setAutoRefresh] = useState(true)
@@ -104,6 +105,37 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
     URL.revokeObjectURL(url)
   }
 
+  function beginMove(event: React.PointerEvent<HTMLButtonElement>) {
+    event.preventDefault()
+    const start = { x: event.clientX, y: event.clientY, position }
+    const move = (pointerEvent: PointerEvent) => setPosition({
+      x: start.position.x + pointerEvent.clientX - start.x,
+      y: start.position.y + pointerEvent.clientY - start.y,
+    })
+    const finish = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', finish)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', finish, { once: true })
+  }
+
+  function beginResize(event: React.PointerEvent<HTMLButtonElement>) {
+    event.preventDefault()
+    event.stopPropagation()
+    const start = { x: event.clientX, y: event.clientY, zoom }
+    const move = (pointerEvent: PointerEvent) => {
+      const delta = ((pointerEvent.clientX - start.x) + (pointerEvent.clientY - start.y)) / 2
+      setZoom(Math.max(25, Math.min(200, Math.round(start.zoom + delta / 2))))
+    }
+    const finish = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', finish)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', finish, { once: true })
+  }
+
   return <section aria-label="Preview workbench" className="flex h-full min-h-0 flex-col bg-[var(--background)]">
     <div className="flex flex-wrap items-center gap-1 border-b bg-[var(--card)] px-2 py-1.5">
       <div role="group" aria-label="Preview device" className="flex items-center gap-0.5">
@@ -116,7 +148,7 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
         <input aria-label="Viewport height" type="number" min={240} max={2560} value={customHeight} onChange={(event) => setCustomHeight(Number(event.target.value))} className="w-16 rounded border bg-transparent px-1 py-0.5 text-[10px]"/>
       </div>}
       <label className="ml-1 flex items-center gap-1 text-[10px] text-[var(--muted-foreground)]">
-        <span>Zoom</span><input aria-label="Preview zoom" type="range" min={25} max={200} step={25} value={zoom} onChange={(event) => setZoom(Number(event.target.value))} className="w-20"/>
+        <span>Zoom</span><input aria-label="Preview zoom" type="range" min={25} max={200} step={1} value={zoom} onChange={(event) => setZoom(Number(event.target.value))} className="w-20"/>
       </label>
       <span className="text-[10px] tabular-nums text-[var(--muted-foreground)]">{viewport.width} × {viewport.height} · {Math.round(viewport.scale * 100)}%</span>
       <div className="ml-auto flex items-center gap-1">
@@ -131,12 +163,37 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
         role={device === 'phone' ? 'region' : undefined}
         aria-label={device === 'phone' ? 'Phone preview screen' : undefined}
         className={`relative mx-auto origin-top-left shadow-2xl ${device === 'phone' ? 'overflow-hidden rounded-[2.75rem] border-[10px] border-[#17120d] bg-[#17120d]' : ''}`}
-        style={{ width: viewport.width, height: viewport.height, boxSizing: 'content-box', transform: `scale(${viewport.scale})`, marginBottom: viewport.height * (viewport.scale - 1), marginRight: viewport.width * (viewport.scale - 1) }}
+        style={{ width: viewport.width, height: viewport.height, boxSizing: 'content-box', transform: `translate(${position.x}px, ${position.y}px) scale(${viewport.scale})`, marginBottom: viewport.height * (viewport.scale - 1), marginRight: viewport.width * (viewport.scale - 1) }}
       >
         <LivePreview ref={frameRef} html={displayHtml} revision={revision}/>
         {device === 'phone' && <>
-          <div aria-hidden="true" className="pointer-events-none absolute left-1/2 top-2 z-20 h-7 w-28 -translate-x-1/2 rounded-full bg-[#17120d]" />
+          <button
+            type="button"
+            aria-label="Move phone preview"
+            title="Drag to move phone preview"
+            onPointerDown={beginMove}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowLeft') setPosition((value) => ({ ...value, x: value.x - 10 }))
+              if (event.key === 'ArrowRight') setPosition((value) => ({ ...value, x: value.x + 10 }))
+              if (event.key === 'ArrowUp') setPosition((value) => ({ ...value, y: value.y - 10 }))
+              if (event.key === 'ArrowDown') setPosition((value) => ({ ...value, y: value.y + 10 }))
+            }}
+            className="absolute left-1/2 top-2 z-20 h-7 w-28 -translate-x-1/2 cursor-move touch-none rounded-full bg-[#17120d] outline-none ring-[var(--accent)] focus-visible:ring-2"
+          />
           <div aria-hidden="true" className="pointer-events-none absolute bottom-2 left-1/2 z-20 h-1.5 w-28 -translate-x-1/2 rounded-full bg-[#17120d]/80" />
+          <button
+            type="button"
+            aria-label="Resize phone preview"
+            title="Drag to resize phone preview"
+            onPointerDown={beginResize}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') setZoom((value) => Math.max(25, value - 5))
+              if (event.key === 'ArrowDown' || event.key === 'ArrowRight') setZoom((value) => Math.min(200, value + 5))
+            }}
+            className="absolute bottom-1 right-1 z-30 h-8 w-8 cursor-nwse-resize touch-none rounded-br-[2rem] outline-none ring-[var(--accent)] focus-visible:ring-2"
+          >
+            <span aria-hidden="true" className="absolute bottom-2 right-2 h-3 w-3 border-b-2 border-r-2 border-white/80" />
+          </button>
         </>}
         {(runtimeError || diagnostics.some((item) => item.severity === 'error')) && <div role="alert" className="absolute inset-x-4 top-4 z-10 rounded-lg border border-red-400/40 bg-red-950/95 p-3 text-xs text-red-100 shadow-xl">
           <p className="font-semibold">Preview could not run</p>

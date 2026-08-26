@@ -17,6 +17,21 @@ describe('PreviewWorkbench', () => {
     expect(screen.getByText('390 × 844 · 75%')).toBeInTheDocument()
   })
 
+  it('moves and resizes the phone with direct manipulation handles', () => {
+    render(<PreviewWorkbench html="<h1>Start building</h1>" initialDevice="phone" />)
+    const phone = screen.getByRole('region', { name: 'Phone preview screen' })
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Move phone preview' }), { clientX: 100, clientY: 100 })
+    fireEvent.pointerMove(window, { clientX: 150, clientY: 130 })
+    fireEvent.pointerUp(window)
+    expect(phone).toHaveStyle({ transform: 'translate(50px, 30px) scale(0.75)' })
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Resize phone preview' }), { clientX: 100, clientY: 100 })
+    fireEvent.pointerMove(window, { clientX: 140, clientY: 140 })
+    fireEvent.pointerUp(window)
+    expect(screen.getByText('390 × 844 · 95%')).toBeInTheDocument()
+  })
+
   it('provides working device, orientation, zoom, and bounded custom viewport controls', () => {
     render(<PreviewWorkbench html="<h1>Ready</h1>" initialDevice="phone" />)
 
