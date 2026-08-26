@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { useEffect, useState, useTransition } from 'react'
-import { Archive, Copy, FolderPlus, MoreHorizontal, RotateCcw, Settings, Trash2 } from 'lucide-react'
+import { Archive, Copy, FolderPlus, KeyRound, MoreHorizontal, RotateCcw, Settings, Trash2 } from 'lucide-react'
 import type { Project, UserSettings } from '@/lib/db/schema'
 import {
   archiveProjectAction,
@@ -14,7 +14,11 @@ import {
   restoreProjectAction,
   softDeleteProjectAction,
   updateSettingsAction,
+  clearAiProviderAction,
+  getAiProviderStatusAction,
+  saveAiProviderAction,
 } from '@/app/actions/projects'
+import type { AiProviderStatus } from '@/lib/ai-provider'
 import { useRouter } from 'next/navigation'
 import { useResolvedTheme } from '@/components/lotus/use-resolved-theme'
 
@@ -39,12 +43,27 @@ export function ProjectDashboard({ initialProjects, initialSettings, userName }:
   const [error, setError] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
+  const [aiStatus, setAiStatus] = useState<AiProviderStatus | null>(null)
+  const [aiProvider, setAiProvider] = useState<AiProviderStatus['provider']>('vercel')
+  const [aiModel, setAiModel] = useState('anthropic/claude-sonnet-4.5')
+  const [aiBaseURL, setAiBaseURL] = useState('')
+  const [aiKey, setAiKey] = useState('')
   const [pending, startTransition] = useTransition()
   const resolvedTheme = useResolvedTheme(settings.theme)
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', resolvedTheme === 'dark')
   }, [resolvedTheme])
+
+  useEffect(() => {
+    if (!settingsOpen || aiStatus) return
+    getAiProviderStatusAction().then((status) => {
+      setAiStatus(status)
+      setAiProvider(status.provider)
+      setAiModel(status.model)
+      setAiBaseURL(status.baseURL)
+    }).catch(() => setError('Could not load AI provider settings.'))
+  }, [aiStatus, settingsOpen])
 
   function run(action: () => Promise<void>) {
     setError(null)
@@ -69,6 +88,38 @@ export function ProjectDashboard({ initialProjects, initialSettings, userName }:
     run(async () => {
       const updated = await updateSettingsAction({ [key]: value })
       setSettings(updated)
+    })
+  }
+
+  function changeAiProvider(provider: AiProviderStatus['provider']) {
+    const defaults: Record<AiProviderStatus['provider'], { model: string; baseURL: string }> = {
+      vercel: { model: 'anthropic/claude-sonnet-4.5', baseURL: '' },
+      openai: { model: 'gpt-4.1', baseURL: '' },
+      anthropic: { model: 'claude-sonnet-4-5', baseURL: '' },
+      google: { model: 'gemini-2.5-pro', baseURL: '' },
+      openrouter: { model: 'anthropic/claude-sonnet-4.5', baseURL: 'https://openrouter.ai/api/v1' },
+      custom: { model: 'model-name', baseURL: 'https://api.example.com/v1' },
+    }
+    setAiProvider(provider)
+    setAiModel(defaults[provider].model)
+    setAiBaseURL(defaults[provider].baseURL)
+    setAiKey('')
+  }
+
+  function saveAiProvider() {
+    run(async () => {
+      const result = await saveAiProviderAction({ provider: aiProvider, model: aiModel, baseURL: aiBaseURL, apiKey: aiKey })
+      if (!result.ok) throw new Error(result.error)
+      setAiStatus(result.status)
+      setAiKey('')
+    })
+  }
+
+  function clearAiProvider() {
+    run(async () => {
+      const status = await clearAiProviderAction()
+      setAiStatus(status)
+      changeAiProvider('vercel')
     })
   }
 
@@ -134,6 +185,29 @@ export function ProjectDashboard({ initialProjects, initialSettings, userName }:
             <SettingSelect label="Editor font size" value={String(settings.editorFontSize)} disabled={pending} onChange={(value) => updatePreference('editorFontSize', Number(value))} options={[["12", "12 px"], ["14", "14 px"], ["16", "16 px"], ["18", "18 px"], ["20", "20 px"], ["24", "24 px"]]} />
             <SettingSelect label="Autosave interval" value={String(settings.autosaveInterval)} disabled={pending} onChange={(value) => updatePreference('autosaveInterval', Number(value))} options={[["5", "5 seconds"], ["15", "15 seconds"], ["30", "30 seconds"], ["60", "1 minute"], ["300", "5 minutes"]]} />
             <SettingSelect label="Default device" value={settings.defaultDevice} disabled={pending} onChange={(value) => updatePreference('defaultDevice', value as DashboardSettings['defaultDevice'])} options={[['phone', 'Phone'], ['tablet', 'Tablet'], ['desktop', 'Desktop']]} />
+          </div>
+          <div className="mt-6 border-t border-border pt-5">
+            <div className="flex items-center gap-2"><KeyRound size={17} /><h3 className="font-semibold">AI provider</h3></div>
+            <p className="mt-1 text-sm text-muted-foreground">Use Vercel Gateway or bring your own provider key. Keys are encrypted in an HttpOnly cookie and are never saved in project files.</p>
+            <div className="mt-4 grid gap-3">
+              <SettingSelect label="Provider" value={aiProvider} disabled={pending} onChange={(value) => changeAiProvider(value as AiProviderStatus['provider'])} options={[
+                ['vercel', 'Vercel AI Gateway'], ['openai', 'OpenAI'], ['anthropic', 'Anthropic'], ['google', 'Google Gemini'], ['openrouter', 'OpenRouter'], ['custom', 'Custom OpenAI-compatible'],
+              ]} />
+              <label className="grid gap-1.5 text-sm font-medium">Model
+                <input value={aiModel} disabled={pending} onChange={(event) => setAiModel(event.target.value)} placeholder="Provider model ID" className="rounded-lg border border-border bg-background px-3 py-2 font-normal disabled:opacity-60" />
+              </label>
+              {aiProvider === 'custom' && <label className="grid gap-1.5 text-sm font-medium">API base URL
+                <input value={aiBaseURL} disabled={pending} onChange={(event) => setAiBaseURL(event.target.value)} placeholder="https://api.provider.com/v1" className="rounded-lg border border-border bg-background px-3 py-2 font-normal disabled:opacity-60" />
+              </label>}
+              {aiProvider !== 'vercel' && <label className="grid gap-1.5 text-sm font-medium">API key
+                <input type="password" autoComplete="off" value={aiKey} disabled={pending} onChange={(event) => setAiKey(event.target.value)} placeholder={aiStatus?.provider === aiProvider && aiStatus.keyHint ? `Saved ${aiStatus.keyHint} — leave blank to keep it` : 'Paste provider API key'} className="rounded-lg border border-border bg-background px-3 py-2 font-normal disabled:opacity-60" />
+              </label>}
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={saveAiProvider} disabled={pending} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60">Save AI provider</button>
+                {aiStatus?.provider !== 'vercel' && <button type="button" onClick={clearAiProvider} disabled={pending} className="rounded-lg border border-border px-4 py-2 text-sm disabled:opacity-60">Use Vercel instead</button>}
+                {aiStatus?.configured && <span className="text-xs text-muted-foreground">Connected: {aiStatus.provider}{aiStatus.keyHint ? ` ${aiStatus.keyHint}` : ''}</span>}
+              </div>
+            </div>
           </div>
         </section>}
       </div>

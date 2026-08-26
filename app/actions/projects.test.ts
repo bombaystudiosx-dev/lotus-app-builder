@@ -29,6 +29,9 @@ const mocks = vi.hoisted(() => ({
   trashFile: vi.fn(),
   restoreFile: vi.fn(),
   guestUser: vi.fn(),
+  cookieGet: vi.fn(),
+  cookieSet: vi.fn(),
+  cookieDelete: vi.fn(),
 }))
 
 vi.mock('@/lib/auth', () => ({
@@ -61,7 +64,10 @@ vi.mock('@/lib/projects', () => ({ createProjectService: vi.fn(() => ({
 })) }))
 vi.mock('ai', () => ({ generateText: mocks.generateText }))
 vi.mock('@/lib/local-bundler', () => ({ bundleReactProject: mocks.bundleReactProject }))
-vi.mock('next/headers', () => ({ headers: vi.fn(async () => new Headers()) }))
+vi.mock('next/headers', () => ({
+  headers: vi.fn(async () => new Headers()),
+  cookies: vi.fn(async () => ({ get: mocks.cookieGet, set: mocks.cookieSet, delete: mocks.cookieDelete })),
+}))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
 
 import {
@@ -71,6 +77,7 @@ import {
   createProjectFileAction,
   duplicateProjectAction,
   getProjectDashboard,
+  getAiProviderStatusAction,
   getUserSettings,
   getWorkspace,
   permanentlyDeleteProjectAction,
@@ -80,6 +87,7 @@ import {
   restoreProjectFileAction,
   runBuild,
   runBuildAction,
+  saveAiProviderAction,
   softDeleteProjectAction,
   trashProjectFileAction,
   updateProjectFileAction,
@@ -98,8 +106,10 @@ const specification = {
 }
 
 beforeEach(() => {
+  process.env.BETTER_AUTH_SECRET = 'test-secret-with-at-least-sixteen-characters'
   mocks.session.mockResolvedValue({ user: { id: 'user-a' } })
   mocks.guestUser.mockReturnValue('user-a')
+  mocks.cookieGet.mockReturnValue(undefined)
 })
 
 describe('inactive project builder guards', () => {
@@ -331,6 +341,26 @@ describe('generation errors and initial builds', () => {
       ok: false,
       error: 'Generation failed. Check your server-side AI provider configuration and try again.',
     })
+  })
+})
+
+describe('bring-your-own AI provider settings', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('stores a provider key only in an encrypted HttpOnly cookie and returns a masked status', async () => {
+    const result = await saveAiProviderAction({ provider: 'openai', apiKey: 'sk-provider-secret', model: 'gpt-4.1', baseURL: '' })
+
+    expect(result).toMatchObject({ ok: true, status: { provider: 'openai', configured: true, keyHint: '••••cret' } })
+    expect(mocks.cookieSet).toHaveBeenCalledWith('lotus-ai-provider', expect.not.stringContaining('sk-provider-secret'), expect.objectContaining({ httpOnly: true, sameSite: 'lax' }))
+  })
+
+  it('reports the default Vercel provider when no provider cookie exists', async () => {
+    await expect(getAiProviderStatusAction()).resolves.toMatchObject({ provider: 'vercel', configured: true })
+  })
+
+  it('rejects an unsafe custom provider URL before saving credentials', async () => {
+    await expect(saveAiProviderAction({ provider: 'custom', apiKey: 'custom-secret-key', model: 'model', baseURL: 'https://127.0.0.1/v1' })).resolves.toEqual({ ok: false, error: 'Enter a public HTTPS API base URL.' })
+    expect(mocks.cookieSet).not.toHaveBeenCalled()
   })
 })
 

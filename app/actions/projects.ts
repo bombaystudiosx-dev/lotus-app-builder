@@ -10,6 +10,8 @@ import { createProjectService } from '@/lib/projects'
 import { assembleStaticPreview, type PreviewBuild } from '@/lib/preview-runtime'
 import type { ProjectSpecification } from '@/lib/project-specification'
 import { ensureGuestWorkspace } from '@/lib/guest-workspace'
+import { cookies } from 'next/headers'
+import { AI_PROVIDER_COOKIE, aiProviderSchema, aiProviderStatus, decryptAiProviderConfig, defaultAiProviderConfig, encryptAiProviderConfig, generationModel, type AiProviderStatus } from '@/lib/ai-provider'
 
 async function getUserId() {
   return ensureGuestWorkspace(sqlite)
@@ -39,6 +41,38 @@ export async function getProjectDashboard() {
 
 export async function getUserSettings() {
   return projects.getSettings(await getUserId())
+}
+
+export async function getAiProviderStatusAction(): Promise<AiProviderStatus> {
+  return aiProviderStatus(decryptAiProviderConfig((await cookies()).get(AI_PROVIDER_COOKIE)?.value))
+}
+
+export async function saveAiProviderAction(input: unknown): Promise<{ ok: true; status: AiProviderStatus } | { ok: false; error: string }> {
+  try {
+    const existing = decryptAiProviderConfig((await cookies()).get(AI_PROVIDER_COOKIE)?.value)
+    const candidate = input && typeof input === 'object' ? input as Record<string, unknown> : {}
+    const config = aiProviderSchema.parse({
+      ...candidate,
+      apiKey: candidate.apiKey || (candidate.provider === existing.provider ? existing.apiKey : ''),
+    })
+    ;(await cookies()).set(AI_PROVIDER_COOKIE, encryptAiProviderConfig(config), {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 30,
+    })
+    return { ok: true, status: aiProviderStatus(config) }
+  } catch (error) {
+    const issue = error instanceof Error ? error.message : ''
+    const message = issue.match(/"message":\s*"([^"]+)"/)?.[1]
+    return { ok: false, error: message ?? (issue.includes('encryption') ? issue : 'Check the provider settings and try again.') }
+  }
+}
+
+export async function clearAiProviderAction(): Promise<AiProviderStatus> {
+  ;(await cookies()).delete(AI_PROVIDER_COOKIE)
+  return aiProviderStatus(defaultAiProviderConfig())
 }
 
 export async function createBlankProjectAction(name?: string) {
@@ -297,8 +331,9 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
 
   let html = entry.content
   try {
+    const providerConfig = decryptAiProviderConfig((await cookies()).get(AI_PROVIDER_COOKIE)?.value)
     const { text } = await generateText({
-      model: resolveModel(model),
+      model: generationModel(providerConfig, resolveModel(model)),
       system: SYSTEM_PROMPT,
       prompt: userContent,
       maxOutputTokens: 8000,
@@ -306,12 +341,13 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
     html = redactSensitiveValues(stripFences(text))
   } catch (err) {
     const raw = err instanceof Error ? err.message : String(err)
-    // Surface the AI Gateway's billing prerequisite clearly instead of a generic error.
+    // Surface common provider setup failures clearly instead of a generic error.
     if (/credit card|customer_verification_required|valid credit/i.test(raw)) {
       throw new Error(
         'AI generation is not enabled yet: the Vercel AI Gateway requires a credit card on file to unlock your free credits. Add one in your Vercel dashboard under AI, then try again.',
       )
     }
+    if (/401|403|unauthorized|invalid.*(?:api|key)|authentication/i.test(raw)) throw new Error('The selected AI provider rejected its API key. Update it in Settings and try again.')
     throw new Error('Generation failed. Check your server-side AI provider configuration and try again.')
   }
 
@@ -354,6 +390,7 @@ function publicBuildError(message: string) {
   if (/credit card|AI generation is not enabled/i.test(message)) return message
   if (/changed elsewhere/i.test(message)) return 'This project changed while Lotus was building. Please try your request again.'
   if (/Generation failed/i.test(message)) return message
+  if (/rejected its API key/i.test(message)) return message
   if (/not active/i.test(message)) return 'This project is not active. Restore it before building.'
   return 'Lotus could not complete this build. Please try again.'
 }
