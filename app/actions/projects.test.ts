@@ -55,7 +55,7 @@ describe('runtime entry build persistence', () => {
     mocks.getRuntime.mockResolvedValue({ entryPath: 'src/main.html' })
     mocks.getSpecification.mockResolvedValue({
       version: 1,
-      product: { name: 'Active', description: 'Build dispatch software', kind: 'application' },
+      product: { name: 'Active', description: 'Build dispatch software with API_KEY=supersecretvalue', kind: 'application' },
       targets: [{ platform: 'web', framework: 'nextjs', enabled: true }],
       screens: [{ id: 'home', name: 'Home', route: '/', kind: 'page', access: [] }],
       data: { entities: [] },
@@ -75,6 +75,7 @@ describe('runtime entry build persistence', () => {
     expect(mocks.getFileByPath).toHaveBeenCalledWith('user-a', 'project-1', 'src/main.html')
     expect(mocks.generateText).toHaveBeenCalledWith(expect.objectContaining({ prompt: expect.stringContaining('<main>Renamed entry</main>') }))
     expect(mocks.generateText).toHaveBeenCalledWith(expect.objectContaining({ prompt: expect.stringContaining('"platform":"web"') }))
+    expect(mocks.generateText).toHaveBeenCalledWith(expect.objectContaining({ prompt: expect.not.stringContaining('supersecretvalue') }))
     expect(mocks.updateFile).toHaveBeenCalledWith('user-a', 'project-1', 'entry-1', {
       content: '<!doctype html><html><body>Built</body></html>',
       expectedUpdatedAt: entry.updatedAt,
