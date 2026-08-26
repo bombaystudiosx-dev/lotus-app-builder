@@ -59,7 +59,7 @@ describe('safe static preview assembly', () => {
     const output = assembleStaticPreview(files({ 'index.html': '<h1>Hello</h1>' }), 'index.html')
 
     expect(PREVIEW_SANDBOX.split(/\s+/)).not.toContain('allow-same-origin')
-    expect(PREVIEW_SANDBOX).toBe('allow-scripts')
+    expect(PREVIEW_SANDBOX).toBe('')
     expect(output.html).toContain("default-src 'none'")
     expect(output.html).toContain('window.onerror')
     expect(output.html).toContain('unhandledrejection')

@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { chromium, type Browser, type Page } from 'playwright-core'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { JSDOM } from 'jsdom'
-import { assembleStaticPreview, type PreviewFile } from '@/lib/preview-runtime'
+import { assembleStaticPreview, PREVIEW_SANDBOX, type PreviewFile } from '@/lib/preview-runtime'
 
 function files(entries: Record<string, string>): PreviewFile[] {
   return Object.entries(entries).map(([path, content], index) => ({ id: String(index), path, content, encoding: 'utf-8' }))
@@ -45,6 +45,36 @@ describe('safe preview browser containment', () => {
   afterAll(async () => {
     await browser?.close()
   })
+
+  it('does not execute generated JavaScript inside the actual preview sandbox', async () => {
+    const output = assembleStaticPreview(files({
+      'index.html': `<main id="content">HTML still renders</main><script>document.body.dataset.executed='true';parent.postMessage({type:'preview-escaped'},'*')</script>`,
+    }), 'index.html')
+    const page = await browser.newPage()
+    try {
+      await page.setContent('<main id="host">Lotus host</main>')
+      await page.evaluate(({ html, sandbox }) => {
+        const messages: unknown[] = []
+        window.addEventListener('message', (event) => messages.push(event.data))
+        Object.assign(window, { __lotusMessages: messages })
+        const frame = document.createElement('iframe')
+        frame.id = 'preview'
+        frame.setAttribute('sandbox', sandbox)
+        frame.srcdoc = html
+        document.body.appendChild(frame)
+      }, { html: output.html, sandbox: PREVIEW_SANDBOX })
+      const frame = page.frames().find((candidate) => candidate !== page.mainFrame())
+      expect(frame).toBeTruthy()
+      await frame?.waitForSelector('#content')
+      await page.waitForTimeout(100)
+
+      expect(await frame?.locator('#content').textContent()).toBe('HTML still renders')
+      expect(await frame?.locator('body').getAttribute('data-executed')).toBeNull()
+      expect(await page.evaluate(() => (window as typeof window & { __lotusMessages?: unknown[] }).__lotusMessages)).toEqual([])
+    } finally {
+      await page.close()
+    }
+  }, 10_000)
 
   it('allows instrumented function handlers while blocking string-backed handlers', async () => {
     const output = assembleStaticPreview(files({
