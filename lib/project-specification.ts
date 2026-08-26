@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { redactSensitiveValues } from '@/lib/safety'
 
 const identifier = z.string().min(1).max(64).regex(/^[a-z][a-z0-9-]*$/, 'Identifiers must use lowercase letters, numbers, and hyphens.')
 const label = z.string().trim().min(1).max(100)
@@ -102,6 +103,17 @@ function assertUniqueIds(items: Array<{ id: string }>, kind: string) {
 }
 
 function validateReferences(specification: ProjectSpecification) {
+  const targetPlatforms = new Set<TargetPlatform>()
+  for (const target of specification.targets) {
+    if (targetPlatforms.has(target.platform)) throw new ProjectSpecificationError(`Duplicate target platform: ${target.platform}.`)
+    targetPlatforms.add(target.platform)
+    const expectedFramework = target.platform === 'ios' || target.platform === 'android' ? 'expo' : 'nextjs'
+    if (target.framework !== expectedFramework) throw new ProjectSpecificationError(`${target.platform} targets must use ${expectedFramework}.`)
+  }
+  if (!specification.targets.some((target) => target.enabled && target.platform !== 'api')) {
+    throw new ProjectSpecificationError('A Lotus project needs at least one user interface target.')
+  }
+
   assertUniqueIds(specification.screens, 'screen')
   assertUniqueIds(specification.data.entities, 'entity')
   assertUniqueIds(specification.access.roles, 'role')
@@ -131,12 +143,27 @@ function validateReferences(specification: ProjectSpecification) {
   }
   for (const permission of specification.access.permissions) {
     if (!roleIds.has(permission.roleId)) throw new ProjectSpecificationError(`Permission references unknown role ${permission.roleId}.`)
+    if (permission.resource !== 'project' && !entityIds.has(permission.resource)) {
+      throw new ProjectSpecificationError(`Permission references unknown resource ${permission.resource}.`)
+    }
   }
   for (const workflow of specification.workflows) {
+    if ((workflow.trigger.type === 'form' || workflow.trigger.type === 'button') && !workflow.trigger.screenId) {
+      throw new ProjectSpecificationError(`Workflow ${workflow.id} ${workflow.trigger.type} trigger requires a screen.`)
+    }
     if (workflow.trigger.screenId && !screenIds.has(workflow.trigger.screenId)) {
       throw new ProjectSpecificationError(`Workflow ${workflow.id} references unknown screen ${workflow.trigger.screenId}.`)
     }
     for (const step of workflow.steps) {
+      if (step.type.startsWith('data.') && !step.entityId) {
+        throw new ProjectSpecificationError(`Workflow ${workflow.id} ${step.type} step requires an entity.`)
+      }
+      if (step.type === 'navigate' && !step.screenId) {
+        throw new ProjectSpecificationError(`Workflow ${workflow.id} navigate step requires a screen.`)
+      }
+      if ((step.type === 'email.send' || step.type === 'api.call') && !step.integrationId) {
+        throw new ProjectSpecificationError(`Workflow ${workflow.id} ${step.type} step requires an integration.`)
+      }
       if (step.screenId && !screenIds.has(step.screenId)) throw new ProjectSpecificationError(`Workflow ${workflow.id} references unknown screen ${step.screenId}.`)
       if (step.entityId && !entityIds.has(step.entityId)) throw new ProjectSpecificationError(`Workflow ${workflow.id} references unknown entity ${step.entityId}.`)
       if (step.integrationId && !integrationIds.has(step.integrationId)) throw new ProjectSpecificationError(`Workflow ${workflow.id} references unknown integration ${step.integrationId}.`)
@@ -150,8 +177,9 @@ export function parseProjectSpecification(input: unknown): ProjectSpecification 
     const issue = result.error.issues[0]
     throw new ProjectSpecificationError(issue?.message ?? 'Project specification is invalid.')
   }
-  validateReferences(result.data)
-  return result.data
+  const redacted = projectSpecificationSchema.parse(JSON.parse(redactSensitiveValues(JSON.stringify(result.data))))
+  validateReferences(redacted)
+  return redacted
 }
 
 const frameworks: Record<TargetPlatform, 'nextjs' | 'expo'> = {

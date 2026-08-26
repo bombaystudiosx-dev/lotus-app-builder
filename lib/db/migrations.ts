@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { createProjectSpecification } from '@/lib/project-specification'
 
 const SCHEMA_VERSION = 5
 
@@ -213,6 +214,22 @@ function rebuildProjectSpecificationTable(sqlite: Database.Database) {
   `)
 }
 
+function backfillProjectSpecifications(sqlite: Database.Database) {
+  const projects = sqlite.prepare(`SELECT p.id, p.name, p.createdAt, p.updatedAt
+    FROM project p LEFT JOIN project_specification s ON s.projectId = p.id
+    WHERE s.projectId IS NULL`).all() as Array<{ id: string; name: string; createdAt: number; updatedAt: number }>
+  const insert = sqlite.prepare(`INSERT INTO project_specification (projectId, specification, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?)`)
+  for (const project of projects) {
+    const specification = createProjectSpecification({
+      name: project.name,
+      prompt: `Build ${project.name}`,
+      targets: ['web'],
+    })
+    insert.run(project.id, JSON.stringify(specification), project.createdAt, project.updatedAt)
+  }
+}
+
 function safeLegacyPath(value: string, ordinal: number) {
   const normalized = value.replace(/\\/g, '/').replace(/^\/+/, '')
   const segments = normalized.split('/')
@@ -283,6 +300,7 @@ export function migrateDatabase(sqlite: Database.Database) {
       rebuildProjectFileTable(sqlite)
       rebuildProjectRuntimeTable(sqlite)
       rebuildProjectSpecificationTable(sqlite)
+      backfillProjectSpecifications(sqlite)
       migrateLegacyProjectFiles(sqlite, priorVersion)
       sqlite.exec(CREATE_INDEXES_SQL)
       assertForeignKeyIntegrity(sqlite)
