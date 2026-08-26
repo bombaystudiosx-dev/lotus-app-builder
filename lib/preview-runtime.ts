@@ -6,7 +6,9 @@ export type PreviewOrientation = 'portrait' | 'landscape'
 export interface PreviewFile { id?: string; path: string; content: string; encoding?: 'utf-8' | 'utf-16le' }
 export interface PreviewDiagnostic { severity: 'error' | 'warning'; message: string; path?: string; line?: number; column?: number }
 export interface PreviewBuild { html: string; diagnostics: PreviewDiagnostic[]; revision?: number }
-export const PREVIEW_SANDBOX = 'allow-scripts'
+// Generated code is untrusted. An empty sandbox token list keeps the iframe's
+// opaque origin and denies scripts, navigation, forms, popups, and downloads.
+export const PREVIEW_SANDBOX = ''
 
 type HtmlAttribute = { name: string; value: string }
 type HtmlNode = { nodeName: string; tagName?: string; value?: string; attrs?: HtmlAttribute[]; childNodes?: HtmlNode[]; parentNode?: HtmlNode; content?: HtmlNode }
