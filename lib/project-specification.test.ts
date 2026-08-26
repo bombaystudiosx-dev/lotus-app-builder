@@ -93,6 +93,10 @@ describe('project specification', () => {
     })).toThrow('Duplicate role id')
     expect(() => parseProjectSpecification({
       ...base,
+      screens: [base.screens[0], { ...base.screens[0], id: 'another-home' }],
+    })).toThrow('Duplicate screen route')
+    expect(() => parseProjectSpecification({
+      ...base,
       workflows: [{
         id: 'submit-job',
         name: 'Submit job',

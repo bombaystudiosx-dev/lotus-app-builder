@@ -107,6 +107,22 @@ describe('migrateDatabase', () => {
     expect(database.pragma('user_version', { simple: true })).toBe(firstVersion)
   })
 
+  it('backfills specifications for legacy project names outside current input limits', () => {
+    const database = createLegacyDatabase()
+    database.exec(`
+      INSERT INTO user VALUES ('user-1', 'Lotus', 'lotus@example.com', 0, NULL, 1, 1);
+      INSERT INTO project VALUES ('blank-name', 'user-1', '   ', 'html', '{}', 1, 1);
+      INSERT INTO project VALUES ('long-name', 'user-1', '${'a'.repeat(140)}', 'html', '{}', 1, 1);
+    `)
+
+    expect(() => migrateDatabase(database)).not.toThrow()
+    const rows = database.prepare('SELECT projectId, specification FROM project_specification ORDER BY projectId').all() as Array<{ projectId: string; specification: string }>
+    expect(rows.map((row) => ({ projectId: row.projectId, name: JSON.parse(row.specification).product.name }))).toEqual([
+      { projectId: 'blank-name', name: 'Untitled project' },
+      { projectId: 'long-name', name: 'a'.repeat(100) },
+    ])
+  })
+
   it('preserves populated legacy rows and cascades after upgrade', () => {
     const database = createLegacyDatabase()
     database.exec(`
