@@ -125,6 +125,12 @@ describe('migrateDatabase', () => {
       { path: 'src/app.js', content: 'console.log(1)', encoding: 'utf-8' },
     ])
     expect(database.prepare("SELECT runtime, entryPath FROM project_runtime WHERE projectId = 'project-1'").get()).toEqual({ runtime: 'static', entryPath: 'index.html' })
+    const storedSpecification = database.prepare("SELECT specification FROM project_specification WHERE projectId = 'project-1'").get() as { specification: string }
+    expect(JSON.parse(storedSpecification.specification)).toMatchObject({
+      version: 1,
+      product: { name: 'Existing project', kind: 'application' },
+      targets: [{ platform: 'web', framework: 'nextjs', enabled: true }],
+    })
     database.prepare("DELETE FROM user WHERE id = 'user-1'").run()
     expect(database.prepare('SELECT count(*) AS count FROM project').get()).toEqual({ count: 0 })
     expect(database.prepare('SELECT count(*) AS count FROM message').get()).toEqual({ count: 0 })
@@ -170,6 +176,7 @@ describe('migrateDatabase', () => {
 
     expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
     expectRequiredChildIndexes(database)
+    expect(database.prepare("SELECT projectId FROM project_specification WHERE projectId = 'project-1'").get()).toEqual({ projectId: 'project-1' })
   })
 
   it('retires legacy file JSON atomically so restarts cannot resurrect trashed or deleted files', () => {

@@ -62,6 +62,19 @@ describe('project specification', () => {
     })).toThrow('at least one user interface target')
   })
 
+  it('rejects duplicate targets, API-only products, and platform/framework mismatches at the parse boundary', () => {
+    const base = createProjectSpecification({
+      name: 'Strict targets',
+      prompt: 'Build an app',
+      targets: ['web'],
+    })
+
+    expect(() => parseProjectSpecification({ ...base, targets: [base.targets[0], base.targets[0]] })).toThrow('Duplicate target')
+    expect(() => parseProjectSpecification({ ...base, targets: [{ platform: 'api', framework: 'nextjs', enabled: true }] })).toThrow('at least one user interface target')
+    expect(() => parseProjectSpecification({ ...base, targets: [{ platform: 'ios', framework: 'nextjs', enabled: true }] })).toThrow('must use expo')
+    expect(() => parseProjectSpecification({ ...base, targets: [{ platform: 'web', framework: 'expo', enabled: true }] })).toThrow('must use nextjs')
+  })
+
   it('rejects unknown keys, unsafe identifiers, duplicate ids, and invalid references', () => {
     const base = createProjectSpecification({
       name: 'Operations',
@@ -109,6 +122,39 @@ describe('project specification', () => {
       ...base,
       screens: [{ ...base.screens[0], source: '<script>alert(1)</script>' }],
     })).toThrow('Unrecognized')
+    expect(parseProjectSpecification({
+      ...base,
+      product: { ...base.product, description: 'Connect with API_KEY=supersecretvalue' },
+    }).product.description).toBe('Connect with API_KEY=[REDACTED]')
+  })
+
+  it('requires semantically complete workflow triggers, steps, and permission resources', () => {
+    const base = createProjectSpecification({
+      name: 'Workflow safety',
+      prompt: 'Build a workflow app',
+      targets: ['web'],
+    })
+    const withEntity = {
+      ...base,
+      data: { entities: [{ id: 'job', name: 'Job', fields: [] }] },
+    }
+
+    expect(() => parseProjectSpecification({
+      ...withEntity,
+      workflows: [{ id: 'submit', name: 'Submit', trigger: { type: 'form' }, steps: [] }],
+    })).toThrow('form trigger requires a screen')
+    expect(() => parseProjectSpecification({
+      ...withEntity,
+      workflows: [{ id: 'save', name: 'Save', trigger: { type: 'button', screenId: 'home' }, steps: [{ type: 'data.create' }] }],
+    })).toThrow('data.create step requires an entity')
+    expect(() => parseProjectSpecification({
+      ...withEntity,
+      workflows: [{ id: 'go', name: 'Go', trigger: { type: 'button', screenId: 'home' }, steps: [{ type: 'navigate' }] }],
+    })).toThrow('navigate step requires a screen')
+    expect(() => parseProjectSpecification({
+      ...withEntity,
+      access: { ...base.access, permissions: [{ roleId: 'owner', resource: 'missing', actions: ['read'] }] },
+    })).toThrow('unknown resource')
   })
 
   it('accepts relational data, permissions, workflows, and environment references', () => {
