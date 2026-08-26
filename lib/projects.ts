@@ -3,6 +3,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type Database from 'better-sqlite3'
 import type * as schema from '@/lib/db/schema'
 import { project, userSettings, type Project, type ProjectFile, type ProjectRuntime, type UserSettings } from '@/lib/db/schema'
+import { createProjectSpecification, parseProjectSpecification, type ProjectSpecification } from '@/lib/project-specification'
 
 export type ProjectStatus = 'active' | 'archived' | 'trashed'
 export type Theme = 'system' | 'light' | 'dark'
@@ -184,10 +185,33 @@ export function createProjectService(database: ProjectDatabase) {
         .where(and(eq(project.id, projectId), eq(project.userId, userId))).limit(1)
       return row ?? null
     },
+    async getSpecification(userId: string, projectId: string) {
+      await owned(userId, projectId)
+      const row = sqlite.prepare('SELECT specification FROM project_specification WHERE projectId = ?').get(projectId) as { specification: string } | undefined
+      if (!row) throw new ProjectLifecycleError('Project specification is unavailable.')
+      try {
+        return parseProjectSpecification(JSON.parse(row.specification))
+      } catch (error) {
+        if (error instanceof SyntaxError) throw new ProjectLifecycleError('Project specification is corrupted.')
+        throw error
+      }
+    },
+    async updateSpecification(userId: string, projectId: string, input: unknown): Promise<ProjectSpecification> {
+      assertWritableProject(userId, projectId)
+      const specification = parseProjectSpecification(input)
+      const now = Date.now()
+      sqlite.prepare(`INSERT INTO project_specification (projectId, specification, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(projectId) DO UPDATE SET specification = excluded.specification, updatedAt = excluded.updatedAt`)
+        .run(projectId, JSON.stringify(specification), now, now)
+      touchProject(projectId, now)
+      return specification
+    },
     async createBlank(userId: string, name = 'Untitled project') {
       const now = new Date()
+      const projectName = normalizedName(name)
       const created: typeof project.$inferInsert = {
-        id: newId(), userId, name: normalizedName(name), mode: 'html', files: {}, status: 'active', createdAt: now, updatedAt: now,
+        id: newId(), userId, name: projectName, mode: 'html', files: {}, status: 'active', createdAt: now, updatedAt: now,
       }
       withTransaction(() => {
         database.insert(project).values(created).run()
@@ -200,6 +224,14 @@ export function createProjectService(database: ProjectDatabase) {
           const file = validateFileInput(starter)
           insert.run(newId(), created.id, file.path, file.content, file.encoding, file.bytes, now.getTime(), now.getTime())
         }
+        const specification = createProjectSpecification({
+          name: projectName,
+          prompt: `Build ${projectName}`,
+          targets: ['web'],
+        })
+        sqlite.prepare(`INSERT INTO project_specification (projectId, specification, createdAt, updatedAt)
+          VALUES (?, ?, ?, ?)`)
+          .run(created.id, JSON.stringify(specification), now.getTime(), now.getTime())
       })
       return (await owned(userId, created.id))
     },
@@ -226,6 +258,12 @@ export function createProjectService(database: ProjectDatabase) {
         const insert = sqlite.prepare(`INSERT INTO project_file (id, projectId, path, content, encoding, size, originalPath, deletedAt, createdAt, updatedAt)
           VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`)
         for (const file of files) insert.run(newId(), created.id, file.path, file.content, file.encoding, file.size, file.originalPath, now.getTime(), now.getTime())
+        const specification = sqlite.prepare('SELECT specification FROM project_specification WHERE projectId = ?').get(source.id) as { specification: string } | undefined
+        if (specification) {
+          sqlite.prepare(`INSERT INTO project_specification (projectId, specification, createdAt, updatedAt)
+            VALUES (?, ?, ?, ?)`)
+            .run(created.id, specification.specification, now.getTime(), now.getTime())
+        }
       })
       return owned(userId, created.id)
     },

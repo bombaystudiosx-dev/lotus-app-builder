@@ -1,4 +1,5 @@
 import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import type { ProjectSpecification } from '@/lib/project-specification'
 
 const timestamp = (name: string) => integer(name, { mode: 'timestamp' }).notNull().$defaultFn(() => new Date())
 
@@ -43,6 +44,11 @@ export const projectRuntime = sqliteTable('project_runtime', {
   buildTool: text('buildTool'), entryPath: text('entryPath').notNull().default('index.html'), metadata: text('metadata', { mode: 'json' }).$type<Record<string, string>>().notNull().default({}),
   createdAt: timestamp('createdAt'), updatedAt: timestamp('updatedAt'),
 })
+export const projectSpecification = sqliteTable('project_specification', {
+  projectId: text('projectId').primaryKey().references(() => project.id, { onDelete: 'cascade' }),
+  specification: text('specification', { mode: 'json' }).$type<ProjectSpecification>().notNull(),
+  createdAt: timestamp('createdAt'), updatedAt: timestamp('updatedAt'),
+})
 export const userSettings = sqliteTable('user_settings', {
   userId: text('userId').primaryKey().references(() => user.id, { onDelete: 'cascade' }),
   theme: text('theme', { enum: ['system', 'light', 'dark'] }).notNull().default('system'),
@@ -65,3 +71,4 @@ export type UserSettings = typeof userSettings.$inferSelect
 export type ProjectFiles = Record<string, string>
 export type ProjectFile = typeof projectFile.$inferSelect
 export type ProjectRuntime = typeof projectRuntime.$inferSelect
+export type StoredProjectSpecification = typeof projectSpecification.$inferSelect

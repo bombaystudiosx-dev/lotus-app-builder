@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 
-const SCHEMA_VERSION = 4
+const SCHEMA_VERSION = 5
 
 const CREATE_BASE_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS user (
@@ -51,6 +51,13 @@ const CREATE_PROJECT_RUNTIME_TABLE_SQL = `
     projectId TEXT PRIMARY KEY REFERENCES project(id) ON DELETE CASCADE,
     runtime TEXT NOT NULL DEFAULT 'static', framework TEXT NOT NULL DEFAULT 'static', buildTool TEXT,
     entryPath TEXT NOT NULL DEFAULT 'index.html', metadata TEXT NOT NULL DEFAULT '{}', createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
+  );
+`
+
+const CREATE_PROJECT_SPECIFICATION_TABLE_SQL = `
+  CREATE TABLE project_specification (
+    projectId TEXT PRIMARY KEY REFERENCES project(id) ON DELETE CASCADE,
+    specification TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
   );
 `
 
@@ -190,6 +197,22 @@ function rebuildProjectRuntimeTable(sqlite: Database.Database) {
   `)
 }
 
+function rebuildProjectSpecificationTable(sqlite: Database.Database) {
+  if (!tableExists(sqlite, 'project_specification')) {
+    sqlite.exec(CREATE_PROJECT_SPECIFICATION_TABLE_SQL)
+    return
+  }
+  if (hasForeignKey(sqlite, 'project_specification', 'projectId', 'project')) return
+  assertNoOrphans(sqlite, 'project_specification', 'projectId', 'project')
+  sqlite.exec(`
+    ALTER TABLE project_specification RENAME TO project_specification_legacy;
+    ${CREATE_PROJECT_SPECIFICATION_TABLE_SQL}
+    INSERT INTO project_specification (projectId, specification, createdAt, updatedAt)
+      SELECT projectId, specification, createdAt, updatedAt FROM project_specification_legacy;
+    DROP TABLE project_specification_legacy;
+  `)
+}
+
 function safeLegacyPath(value: string, ordinal: number) {
   const normalized = value.replace(/\\/g, '/').replace(/^\/+/, '')
   const segments = normalized.split('/')
@@ -259,6 +282,7 @@ export function migrateDatabase(sqlite: Database.Database) {
       rebuildMessageTable(sqlite)
       rebuildProjectFileTable(sqlite)
       rebuildProjectRuntimeTable(sqlite)
+      rebuildProjectSpecificationTable(sqlite)
       migrateLegacyProjectFiles(sqlite, priorVersion)
       sqlite.exec(CREATE_INDEXES_SQL)
       assertForeignKeyIntegrity(sqlite)
