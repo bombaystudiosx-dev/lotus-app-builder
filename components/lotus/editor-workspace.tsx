@@ -326,7 +326,8 @@ export function EditorWorkspace({ active: workspaceActive = true, runtime = 'sta
   function formatActive() {
     if (!active || languageForPath(active.path) !== 'json') return
     try {
-      setSession((current) => editDocument(current, active.id, `${JSON.stringify(JSON.parse(active.content), null, 2)}\n`))
+      const formatted = `${JSON.stringify(JSON.parse(active.content), null, 2)}\n`
+      setSession((current) => editDocument(current, active.id, formatted))
     } catch { toast.error('Fix JSON syntax errors before formatting.') }
   }
 
