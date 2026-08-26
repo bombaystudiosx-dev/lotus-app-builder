@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
 import { migrateDatabase } from '@/lib/db/migrations'
 import * as schema from '@/lib/db/schema'
+import { createProjectSpecification } from '@/lib/project-specification'
 import { createProjectService, ProjectLifecycleError } from '@/lib/projects'
 
 const databases: Database.Database[] = []
@@ -23,6 +24,38 @@ function setup() {
 }
 
 describe('project lifecycle service', () => {
+  it('persists an owner-scoped website or app specification and copies it on duplicate', async () => {
+    const projects = setup()
+    const created = await projects.createBlank('user-a', 'Dispatch')
+    const specification = createProjectSpecification({
+      name: 'Dispatch',
+      prompt: 'Build dispatch software for web and mobile',
+      targets: ['web', 'ios', 'android', 'api'],
+    })
+
+    await expect(projects.updateSpecification('user-a', created.id, specification)).resolves.toEqual(specification)
+    await expect(projects.getSpecification('user-a', created.id)).resolves.toEqual(specification)
+    await expect(projects.getSpecification('user-b', created.id)).rejects.toThrow('Project not found')
+
+    const duplicate = await projects.duplicate('user-a', created.id)
+    await expect(projects.getSpecification('user-a', duplicate.id)).resolves.toEqual(specification)
+  })
+
+  it('rejects malformed specification updates without replacing the last valid version', async () => {
+    const projects = setup()
+    const created = await projects.createBlank('user-a', 'Safe specification')
+    const specification = createProjectSpecification({
+      name: 'Safe specification',
+      prompt: 'Build a website',
+      kind: 'website',
+      targets: ['web'],
+    })
+    await projects.updateSpecification('user-a', created.id, specification)
+
+    await expect(projects.updateSpecification('user-a', created.id, { ...specification, token: 'exposed' })).rejects.toThrow('Unrecognized')
+    await expect(projects.getSpecification('user-a', created.id)).resolves.toEqual(specification)
+  })
+
   it('creates a blank project for its owner and lists it after a reload', async () => {
     const projects = setup()
 

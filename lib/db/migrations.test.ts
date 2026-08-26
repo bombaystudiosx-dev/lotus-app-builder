@@ -74,6 +74,7 @@ describe('migrateDatabase', () => {
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project'").get()).toBeTruthy()
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project_file'").get()).toBeTruthy()
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project_runtime'").get()).toBeTruthy()
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project_specification'").get()).toBeTruthy()
     expect(database.prepare("PRAGMA foreign_key_list('project')").all()).toContainEqual(
       expect.objectContaining({ from: 'userId', table: 'user', to: 'id' }),
     )
