@@ -34,7 +34,7 @@ const DEVICE_OPTIONS: Array<{ value: PreviewDevice; label: string; icon: React.R
 export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phone' }: PreviewWorkbenchProps) {
   const [device, setDevice] = useState<PreviewDevice>(initialDevice)
   const [orientation, setOrientation] = useState<PreviewOrientation>('portrait')
-  const [zoom, setZoom] = useState(100)
+  const [zoom, setZoom] = useState(75)
   const [customWidth, setCustomWidth] = useState(390)
   const [customHeight, setCustomHeight] = useState(844)
   const [autoRefresh, setAutoRefresh] = useState(true)

@@ -14,6 +14,7 @@ describe('PreviewWorkbench', () => {
     const phone = screen.getByRole('region', { name: 'Phone preview screen' })
     expect(phone).toBeInTheDocument()
     expect(phone).toContainElement(screen.getByTitle('App preview'))
+    expect(screen.getByText('390 × 844 · 75%')).toBeInTheDocument()
   })
 
   it('provides working device, orientation, zoom, and bounded custom viewport controls', () => {
