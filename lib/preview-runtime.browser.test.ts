@@ -46,9 +46,14 @@ describe('safe preview browser containment', () => {
     await browser?.close()
   })
 
-  it('does not execute generated JavaScript inside the actual preview sandbox', async () => {
+  it('executes generated JavaScript while keeping it in an opaque origin away from Lotus', async () => {
     const output = assembleStaticPreview(files({
-      'index.html': `<main id="content">HTML still renders</main><script>document.body.dataset.executed='true';parent.postMessage({type:'preview-escaped'},'*')</script>`,
+      'index.html': `<main id="content">App runs</main><script>
+        document.body.dataset.executed='true';
+        document.body.dataset.origin=location.origin;
+        try { parent.document.getElementById('host').textContent = 'escaped' } catch (_) { document.body.dataset.parentBlocked='true' }
+        try { localStorage.setItem('escaped', 'true') } catch (_) { document.body.dataset.storageBlocked='true' }
+      </script>`,
     }), 'index.html')
     const page = await browser.newPage()
     try {
@@ -68,9 +73,12 @@ describe('safe preview browser containment', () => {
       await frame?.waitForSelector('#content')
       await page.waitForTimeout(100)
 
-      expect(await frame?.locator('#content').textContent()).toBe('HTML still renders')
-      expect(await frame?.locator('body').getAttribute('data-executed')).toBeNull()
-      expect(await page.evaluate(() => (window as typeof window & { __lotusMessages?: unknown[] }).__lotusMessages)).toEqual([])
+      expect(await frame?.locator('#content').textContent()).toBe('App runs')
+      expect(await frame?.locator('body').getAttribute('data-executed')).toBe('true')
+      expect(await frame?.locator('body').getAttribute('data-parent-blocked')).toBe('true')
+      expect(await frame?.locator('body').getAttribute('data-storage-blocked')).toBe('true')
+      expect(await page.locator('#host').textContent()).toBe('Lotus host')
+      expect(await frame?.locator('body').getAttribute('data-origin')).toBe('null')
     } finally {
       await page.close()
     }

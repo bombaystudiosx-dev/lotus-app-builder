@@ -55,11 +55,11 @@ describe('safe static preview assembly', () => {
     ]))
   })
 
-  it('injects a restrictive CSP and runtime bridge while omitting same-origin iframe permission', () => {
+  it('injects a restrictive CSP and runtime bridge while allowing scripts only in an opaque-origin iframe', () => {
     const output = assembleStaticPreview(files({ 'index.html': '<h1>Hello</h1>' }), 'index.html')
 
     expect(PREVIEW_SANDBOX.split(/\s+/)).not.toContain('allow-same-origin')
-    expect(PREVIEW_SANDBOX).toBe('')
+    expect(PREVIEW_SANDBOX).toBe('allow-scripts')
     expect(output.html).toContain("default-src 'none'")
     expect(output.html).toContain('window.onerror')
     expect(output.html).toContain('unhandledrejection')

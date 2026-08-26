@@ -8,10 +8,10 @@ import { LivePreview } from '@/components/lotus/live-preview'
 afterEach(cleanup)
 
 describe('LivePreview navigation containment', () => {
-  it('uses the full browser sandbox without granting generated scripts permission', () => {
+  it('runs generated scripts without granting same-origin permission', () => {
     render(<LivePreview html={'<script>parent.postMessage("escaped", "*")</script><p>safe</p>'} />)
 
-    expect(screen.getByTitle('App preview')).toHaveAttribute('sandbox', '')
+    expect(screen.getByTitle('App preview')).toHaveAttribute('sandbox', 'allow-scripts')
   })
 
   it('recreates the sandboxed srcdoc after an unexpected second iframe load', () => {
