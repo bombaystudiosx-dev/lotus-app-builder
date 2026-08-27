@@ -26,7 +26,7 @@ type DashboardProject = Pick<Project, 'id' | 'name' | 'status' | 'updatedAt'>
 type DashboardSettings = Pick<UserSettings, 'theme' | 'editorFontSize' | 'autosaveInterval' | 'defaultDevice'>
 
 function dateLabel(value: Date) {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+  return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))
 }
 
 function statusLabel(status: DashboardProject['status']) {

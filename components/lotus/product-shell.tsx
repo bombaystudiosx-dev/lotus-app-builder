@@ -39,7 +39,7 @@ const TEMPLATES = [
 ] as const
 
 function formatDate(value: Date) {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+  return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))
 }
 
 function sectionHref(section: ProductSection) { return section === 'projects' ? '/' : `/?section=${section}` }

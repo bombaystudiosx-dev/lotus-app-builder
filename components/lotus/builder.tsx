@@ -627,14 +627,14 @@ export default function App({ initial }: LotusBuilderProps) {
       </aside>
 
       {/* ── Top bar ── */}
-      <header className="flex h-[132px] flex-shrink-0 items-center justify-between gap-4 border-b border-[#f1e8e3] bg-[#fffdfb] px-5 sm:px-8 lg:px-14">
+      <header className="flex h-[92px] flex-shrink-0 items-center justify-between gap-4 border-b border-[#f1e8e3] bg-[#fffdfb] px-4 sm:h-[112px] sm:px-8 lg:h-[132px] lg:px-14">
 
         {/* Logo */}
         <div className="flex min-w-0 items-center gap-3">
           <button type="button" onClick={()=>setMobileNavOpen(true)} aria-label="Open navigation" className="rounded-lg p-2 lg:hidden"><Menu size={21}/></button>
           <div className="min-w-0">
-          <h1 className="text-3xl font-bold tracking-tight text-black sm:text-4xl">App Builder</h1>
-          <p className="mt-2 text-sm text-[#6c584d] sm:text-base">Describe, preview, and deploy your app.</p>
+          <h1 className="text-2xl font-bold tracking-tight text-black sm:text-3xl lg:text-4xl">App Builder</h1>
+          <p className="mt-1 text-xs text-[#6c584d] sm:mt-2 sm:text-sm lg:text-base">Describe, preview, and deploy your app.</p>
           </div>
         </div>
 
@@ -816,10 +816,10 @@ export default function App({ initial }: LotusBuilderProps) {
         </aside>
 
         {/* ── Preview / Code / Deployed ── */}
-        <main className="flex-1 flex flex-col overflow-hidden bg-[#fffdfb] px-4 pb-4 sm:px-7 lg:px-8 lg:pb-7">
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#fffdfb] px-2 pb-2 sm:px-5 sm:pb-4 lg:px-8 lg:pb-7">
 
           {/* Preview toolbar */}
-          <div className="flex-shrink-0 flex items-center justify-between py-3">
+          <div className="flex flex-shrink-0 items-center justify-between py-2 sm:py-3">
             {/* View tabs */}
             <div className="flex items-center gap-1 rounded-xl bg-[#fff4ed] p-1">
               {([["preview","Preview",<Eye key="preview" size={11}/>],["code","Code",<Code2 key="code" size={11}/>],["deployed","Deployed",<Zap key="deployed" size={11}/>]] as const).map(([k,l,icon])=>(
@@ -866,7 +866,7 @@ export default function App({ initial }: LotusBuilderProps) {
             : view === "code" && <div className="flex flex-1 items-center justify-center text-sm" style={{ color:"var(--muted-foreground)" }}>Create the project before editing files.</div>}
           {view==="deployed" && <DeployedPanel html={generatedHtml} projectName={projectName}/>}
 
-          {view === "preview" && <div className="mt-4 flex flex-shrink-0 items-center gap-3 rounded-[18px] border border-[#eadfd8] bg-white p-3 shadow-[0_10px_30px_rgba(93,56,34,0.08)] sm:p-4">
+          {view === "preview" && <div className="mt-2 flex flex-shrink-0 items-center gap-2 rounded-[18px] border border-[#eadfd8] bg-white p-2 shadow-[0_10px_30px_rgba(93,56,34,0.08)] sm:mt-4 sm:gap-3 sm:p-4">
             <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl border border-[#f0e2d9] text-[#f29a70] shadow-sm"><Sparkles size={25}/></span>
             <textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); handleSend(); } }} rows={1} placeholder="Describe the app you want to build..." className="min-w-0 flex-1 resize-none bg-transparent px-2 py-3 text-base text-[#2d211b] outline-none placeholder:text-[#806b60]"/>
             <motion.button whileTap={{scale:0.98}} onClick={()=>handleSend()} disabled={!input.trim() || isTyping} className="inline-flex h-12 flex-shrink-0 items-center gap-2 rounded-xl bg-gradient-to-r from-[#ffb17f] to-[#e8835f] px-4 text-sm font-semibold text-white shadow-[0_7px_20px_rgba(232,131,95,0.3)] disabled:opacity-60 sm:px-7 sm:text-base"><Sparkles size={19}/><span className="hidden sm:inline">Generate App</span><span className="sm:hidden">Generate</span></motion.button>

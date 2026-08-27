@@ -95,9 +95,14 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
 
   const viewport = useMemo(() => previewViewport({ device, orientation, zoom, customWidth, customHeight }), [customHeight, customWidth, device, orientation, zoom])
   const browserChromeHeight = device === 'desktop' || device === 'custom' ? 38 : 0
+  const frameBorder = device === 'phone' ? 20 : 2
+  const frameOuterWidth = viewport.width + frameBorder
+  const frameOuterHeight = viewport.height + browserChromeHeight + frameBorder
   const displayScale = fitToStage && stageSize.width > 0 && stageSize.height > 0
-    ? Math.min(1, Math.max(0.25, Math.min((stageSize.width - 48) / viewport.width, (stageSize.height - 48) / (viewport.height + browserChromeHeight))))
+    ? Math.min(1, Math.max(0.1, Math.min((stageSize.width - 32) / frameOuterWidth, (stageSize.height - 32) / frameOuterHeight)))
     : viewport.scale
+  const renderedWidth = frameOuterWidth * displayScale
+  const renderedHeight = frameOuterHeight * displayScale
   const displayHtml = autoRefresh ? html : manualHtml
 
   useEffect(() => {
@@ -180,17 +185,19 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
   }
 
   return <section aria-label="Preview workbench" className="flex h-full min-h-0 flex-col bg-white">
-    <div className="flex min-h-[78px] flex-wrap items-center gap-3 border-b border-[#f0e5de] bg-white px-5 py-3 lg:px-7">
-      <div className="mr-auto flex min-w-[190px] items-start gap-3">
+    <div className="flex min-h-[64px] flex-col gap-2 border-b border-[#f0e5de] bg-white px-3 py-2 sm:min-h-[78px] sm:flex-row sm:items-center sm:gap-3 sm:px-5 sm:py-3 lg:px-7">
+      <div className="flex min-w-0 items-start gap-3 sm:mr-auto sm:min-w-[190px]">
         <span className="mt-1.5 h-3.5 w-3.5 rounded-full bg-[#ffad7d]" aria-hidden="true" />
         <div><h2 className="text-base font-semibold text-[#211914]">Live Preview</h2><p className="mt-1 text-xs text-[#806b60]">Preview updated in real-time</p></div>
       </div>
-      <div role="group" aria-label="Preview device" className="flex overflow-hidden rounded-xl border border-[#eadfd8] bg-[#fffdfb] shadow-sm">
-        {DEVICE_OPTIONS.slice(0, 3).map((option) => <button key={option.value} type="button" aria-label={option.label} aria-pressed={device === option.value} onClick={() => chooseDevice(option.value)} className="inline-flex h-10 min-w-[86px] items-center justify-center gap-2 border-r border-[#eadfd8] px-3 text-sm font-medium text-[#332721] transition-colors last:border-r-0 hover:bg-[#fff2e8] aria-pressed:bg-[#ffe2ce]">{option.icon}<span>{option.value[0].toUpperCase() + option.value.slice(1)}</span></button>)}
+      <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-0.5 sm:overflow-visible sm:pb-0">
+        <div role="group" aria-label="Preview device" className="flex flex-shrink-0 overflow-hidden rounded-xl border border-[#eadfd8] bg-[#fffdfb] shadow-sm">
+          {DEVICE_OPTIONS.slice(0, 3).map((option) => <button key={option.value} type="button" aria-label={option.label} aria-pressed={device === option.value} onClick={() => chooseDevice(option.value)} className="inline-flex h-9 min-w-[74px] items-center justify-center gap-1.5 border-r border-[#eadfd8] px-2 text-xs font-medium text-[#332721] transition-colors last:border-r-0 hover:bg-[#fff2e8] aria-pressed:bg-[#ffe2ce] sm:h-10 sm:min-w-[86px] sm:gap-2 sm:px-3 sm:text-sm">{option.icon}<span>{option.value[0].toUpperCase() + option.value.slice(1)}</span></button>)}
+        </div>
+        <button type="button" aria-label="Refresh preview" onClick={refresh} className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border border-[#eadfd8] bg-white text-[#332721] shadow-sm hover:bg-[#fff4ed] sm:h-10 sm:w-10"><RefreshCw size={17}/></button>
       </div>
-      <button type="button" aria-label="Refresh preview" onClick={refresh} className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#eadfd8] bg-white text-[#332721] shadow-sm hover:bg-[#fff4ed]"><RefreshCw size={17}/></button>
     </div>
-    <div className="flex min-h-11 flex-wrap items-center gap-1.5 border-b border-[#f0e5de] bg-[#fffdfb] px-4 py-1.5">
+    <div className="flex min-h-11 flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-[#f0e5de] bg-[#fffdfb] px-3 py-1.5 sm:px-4">
       <button type="button" aria-label="Custom viewport" aria-pressed={device === 'custom'} onClick={() => chooseDevice('custom')} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-[11px] font-semibold text-[#806b60] hover:bg-[#fff0e5] aria-pressed:bg-[#ffe2ce] aria-pressed:text-[#332721]">W×H <span className="hidden sm:inline">Responsive</span></button>
       <div className="hidden items-center gap-0.5 border-l border-[var(--border)] pl-1.5 lg:flex" aria-label="Desktop breakpoint presets">
         {DESKTOP_PRESETS.map((preset) => <button key={preset.label} type="button" aria-label={`${preset.width} pixel viewport`} onClick={() => choosePreset(preset.width, preset.height)} className={`h-8 rounded-md px-2 text-[10px] font-semibold transition-colors hover:bg-[var(--muted)] ${viewport.width === preset.width && viewport.height === preset.height ? 'bg-[var(--muted)] text-[var(--accent)]' : 'text-[var(--muted-foreground)]'}`}>{preset.label}<span className="ml-1 hidden 2xl:inline font-normal">{preset.width}</span></button>)}
@@ -206,18 +213,19 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
       <label className="flex h-8 items-center gap-1 rounded-md border border-[var(--border)] px-2 text-[10px] text-[var(--muted-foreground)]">
         <span>{fitToStage ? `${Math.round(displayScale * 100)}%` : `${zoom}%`}</span><input aria-label="Preview zoom" type="range" min={25} max={200} step={1} value={fitToStage ? Math.round(displayScale * 100) : zoom} onChange={(event) => { setFitToStage(false); setZoom(Number(event.target.value)) }} className="w-16"/>
       </label>
-      <div className="ml-auto flex items-center gap-1">
+      <div className="ml-auto flex flex-shrink-0 items-center gap-1">
         <label className="flex items-center gap-1 text-[10px] text-[var(--muted-foreground)]"><input aria-label="Auto-refresh preview" type="checkbox" checked={autoRefresh} onChange={(event) => { if (!event.target.checked) setManualHtml(html); setAutoRefresh(event.target.checked) }}/> Auto</label>
         <button type="button" aria-label="Download preview HTML" onClick={downloadPreview} className="rounded-md p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--muted)]"><Download size={13}/></button>
       </div>
     </div>
 
-    <div ref={stageRef} className="relative min-h-0 flex-1 overflow-auto bg-[radial-gradient(circle_at_48%_20%,rgba(255,255,255,0.96),transparent_28%),radial-gradient(circle_at_15%_80%,rgba(248,187,149,0.5),transparent_38%),radial-gradient(circle_at_88%_75%,rgba(255,215,190,0.66),transparent_42%),linear-gradient(135deg,#fff9f5_0%,#f8dfd0_55%,#fff7f1_100%)] p-6">
-      <div
+    <div ref={stageRef} data-testid="preview-stage" className="relative min-h-0 flex-1 overflow-auto bg-[radial-gradient(circle_at_48%_20%,rgba(255,255,255,0.96),transparent_28%),radial-gradient(circle_at_15%_80%,rgba(248,187,149,0.5),transparent_38%),radial-gradient(circle_at_88%_75%,rgba(255,215,190,0.66),transparent_42%),linear-gradient(135deg,#fff9f5_0%,#f8dfd0_55%,#fff7f1_100%)] p-4 sm:p-6">
+      <div data-testid="preview-frame-slot" className="relative mx-auto" style={{ width: renderedWidth, height: renderedHeight }}>
+       <div
         role="region"
         aria-label={device === 'phone' ? 'Phone preview screen' : device === 'tablet' ? 'Tablet preview screen' : 'Desktop preview screen'}
         className={`relative origin-top-left shadow-2xl ${device === 'phone' ? 'overflow-hidden rounded-[2.75rem] border-[10px] border-[#17120d] bg-[#17120d]' : 'overflow-hidden rounded-lg border border-black/20 bg-white'}`}
-        style={{ width: viewport.width, height: viewport.height + browserChromeHeight, boxSizing: 'content-box', transform: `translate(${position.x}px, ${position.y}px) scale(${displayScale})`, marginLeft: Math.max(0, (stageSize.width - 48 - viewport.width * displayScale) / 2), marginBottom: (viewport.height + browserChromeHeight) * (displayScale - 1), marginRight: viewport.width * (displayScale - 1) }}
+        style={{ width: viewport.width, height: viewport.height + browserChromeHeight, boxSizing: 'content-box', transform: `translate(${position.x}px, ${position.y}px) scale(${displayScale})` }}
       >
         {browserChromeHeight > 0 && <div className="flex h-[38px] items-center gap-2 border-b border-black/10 bg-[#f4f1eb] px-3 text-[#6b6258]">
           <span className="h-2.5 w-2.5 rounded-full bg-[#ef6b5b]"/><span className="h-2.5 w-2.5 rounded-full bg-[#e8b64f]"/><span className="h-2.5 w-2.5 rounded-full bg-[#65bd69]"/>
@@ -260,6 +268,7 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
           {runtimeError && <p>{runtimeError.message}{runtimeError.source ? ` · ${runtimeError.source}:${runtimeError.line ?? 0}:${runtimeError.column ?? 0}` : ''}</p>}
           {diagnostics.filter((item) => item.severity === 'error').slice(0, 3).map((item, index) => <p key={`${item.path}-${index}`}>{item.path ? `${item.path}: ` : ''}{item.message}</p>)}
         </div>}
+       </div>
       </div>
     </div>
 
