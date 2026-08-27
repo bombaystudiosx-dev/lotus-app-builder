@@ -8,6 +8,10 @@ export const metadata: Metadata = {
   description:
     'Lotus is an AI app builder. Describe what you want, watch it come alive in a live device preview, and refine it with a conversation.',
   generator: 'v0.app',
+  icons: {
+    icon: '/icon.svg',
+    apple: '/apple-icon.png',
+  },
 }
 
 export const viewport: Viewport = {

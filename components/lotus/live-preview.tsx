@@ -50,6 +50,7 @@ export const LivePreview = forwardRef<HTMLIFrameElement, LivePreviewProps>(funct
       ref={setFrame}
       title="App preview"
       srcDoc={html}
+      suppressHydrationWarning
       onLoad={containNavigation}
       sandbox={PREVIEW_SANDBOX}
       referrerPolicy="no-referrer"

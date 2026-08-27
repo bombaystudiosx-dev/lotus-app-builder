@@ -14,7 +14,7 @@ describe('PreviewWorkbench', () => {
     const phone = screen.getByRole('region', { name: 'Phone preview screen' })
     expect(phone).toBeInTheDocument()
     expect(phone).toContainElement(screen.getByTitle('App preview'))
-    expect(screen.getByText('390 × 844 · 75%')).toBeInTheDocument()
+    expect(screen.getByText('390 × 844')).toBeInTheDocument()
   })
 
   it('moves and resizes the phone with direct manipulation handles', () => {
@@ -29,7 +29,7 @@ describe('PreviewWorkbench', () => {
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Resize phone preview' }), { clientX: 100, clientY: 100 })
     fireEvent.pointerMove(window, { clientX: 140, clientY: 140 })
     fireEvent.pointerUp(window)
-    expect(screen.getByText('390 × 844 · 95%')).toBeInTheDocument()
+    expect(screen.getByText('95%')).toBeInTheDocument()
   })
 
   it('provides working device, orientation, zoom, and bounded custom viewport controls', () => {
@@ -43,7 +43,27 @@ describe('PreviewWorkbench', () => {
 
     const frame = screen.getByTitle('App preview')
     expect(frame.parentElement).toHaveStyle({ width: '900px', height: '500px' })
-    expect(screen.getByText('900 × 500 · 75%')).toBeInTheDocument()
+    expect(screen.getByText('900 × 500')).toBeInTheDocument()
+    expect(screen.getByText('75%')).toBeInTheDocument()
+  })
+
+  it('renders desktop sites at a real 1440 by 900 CSS viewport with browser chrome and fit controls', () => {
+    render(<PreviewWorkbench html="<main>Desktop</main>" initialDevice="desktop" />)
+
+    const desktop = screen.getByRole('region', { name: 'Desktop preview screen' })
+    expect(desktop).toHaveStyle({ width: '1440px', height: '938px' })
+    expect(desktop).toContainElement(screen.getByTitle('App preview'))
+    expect(screen.getByText('1440 × 900')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Fit preview to stage' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: '1024 pixel viewport' }))
+    expect(screen.getByText('1024 × 768')).toBeInTheDocument()
+  })
+
+  it('does not expose a permanent console in the product preview', () => {
+    render(<PreviewWorkbench html="<p>Ready</p>" />)
+    expect(screen.queryByLabelText('Preview console')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Console/ })).not.toBeInTheDocument()
   })
 
   it('holds incoming HTML while auto-refresh is off and applies it on manual refresh', () => {
@@ -73,7 +93,7 @@ describe('PreviewWorkbench', () => {
     dispatch({ type: 'lotus-preview-event', channel: 'test-channel', kind: 'console', payload: { level: 'info', args: ['started'] } })
     dispatch({ type: 'lotus-preview-event', channel: 'test-channel', kind: 'error', payload: { message: 'boom', source: 'app.js', line: 4, column: 2 } })
 
-    expect(screen.getByText(/started/)).toBeInTheDocument()
+    expect(screen.queryByText(/started/)).not.toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent('boom')
     expect(screen.getByRole('alert')).toHaveTextContent('app.js:4:2')
   })
@@ -121,6 +141,6 @@ describe('PreviewWorkbench', () => {
     expect(screen.queryByText(/wrong source/)).not.toBeInTheDocument()
     expect(screen.queryByText(/forged/)).not.toBeInTheDocument()
     expect(screen.queryByText(/nested/)).not.toBeInTheDocument()
-    expect(screen.getAllByText(/event-/).length).toBeLessThanOrEqual(40)
+    expect(screen.queryByText(/event-/)).not.toBeInTheDocument()
   })
 })

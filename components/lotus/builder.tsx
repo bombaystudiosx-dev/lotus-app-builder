@@ -5,9 +5,9 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   Send, Sparkles,
   RefreshCw, Code2, Zap, ImageIcon, X, ChevronDown,
-  Plus, Upload, FileText, Brain, Bot, Cpu, Undo2, Redo2,
+  Plus, Upload, FileText, Brain, Bot, Cpu,
   Download, Copy, Eye, Check, RotateCcw,
-  Plug,
+  Plug, BookOpen, Folder, Grid2X2, Menu, Rocket, Settings,
 } from "lucide-react";
 import { PreviewWorkbench } from "@/components/lotus/preview-workbench";
 import { EditorWorkspace } from "@/components/lotus/editor-workspace";
@@ -16,7 +16,7 @@ import { buildProjectPreviewAction, runBuildAction, type WorkspaceMessage } from
 import { toast } from "sonner";
 import { redactSensitiveValues } from "@/lib/safety";
 import Image from "next/image";
-import { useResolvedTheme } from "@/components/lotus/use-resolved-theme";
+import Link from "next/link";
 import { assembleStaticPreview, type PreviewDiagnostic } from "@/lib/preview-runtime";
 
 const logoLotus = "/logo_lotus.png";
@@ -443,7 +443,6 @@ interface LotusBuilderProps {
 }
 
 export default function App({ initial }: LotusBuilderProps) {
-  const resolvedTheme = useResolvedTheme(initial.theme);
   const initialMessages: ChatMessage[] = initial.messages.length
     ? initial.messages.map((m) => ({ id: m.id, role: m.role, content: m.content, ts: new Date(m.ts) }))
     : INIT_MESSAGES;
@@ -472,31 +471,22 @@ export default function App({ initial }: LotusBuilderProps) {
   // UI open/close
   const [showPlus,      setShowPlus]      = useState(false);
   const [showModel,     setShowModel]     = useState(false);
-  const [showAccount,   setShowAccount]   = useState(false);
   const [showConnector, setShowConnector] = useState(false);
   const [showSkills,    setShowSkills]    = useState(false);
   const [showAgents,    setShowAgents]    = useState(false);
   const [showFunctions, setShowFunctions] = useState(false);
   const [showViewApp,   setShowViewApp]   = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   // Build state
   const [autosaved,    setAutosaved]    = useState(true);
   const [dragKey,      setDragKey]      = useState(0); // reset phone position
-  const [history,      setHistory]      = useState<{ label:string; html:string|null }[]>([{ label:"Initial build", html: initialPreview.html || null }]);
+  const [,             setHistory]      = useState<{ label:string; html:string|null }[]>([{ label:"Initial build", html: initialPreview.html || null }]);
   const [historyIdx,   setHistoryIdx]   = useState(0);
-
-  // Jump to a point in history and restore that HTML snapshot into the preview.
-  function goToHistory(idx:number) {
-    if (idx < 0 || idx >= history.length) return;
-    setHistoryIdx(idx);
-    setGeneratedHtml(history[idx].html);
-    setView("preview");
-  }
 
   const messagesEndRef  = useRef<HTMLDivElement>(null);
   const fileInputRef    = useRef<HTMLInputElement>(null);
   const imageInputRef   = useRef<HTMLInputElement>(null);
-  const accountMenuRef  = useRef<HTMLDivElement>(null);
   const previewRequestRef = useRef(0);
   const previewSessionRef = useRef(globalThis.crypto.randomUUID());
 
@@ -527,18 +517,6 @@ export default function App({ initial }: LotusBuilderProps) {
     }, 250);
     return () => { cancelled = true; window.clearTimeout(timeout); };
   }, [builderFiles, entryPath, initial.runtime, projectId]);
-
-  // Close the account menu on outside click.
-  useEffect(() => {
-    if (!showAccount) return;
-    function handler(e: MouseEvent) {
-      if (accountMenuRef.current && !accountMenuRef.current.contains(e.target as Node)) {
-        setShowAccount(false);
-      }
-    }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [showAccount]);
 
   // Counts for context bar
   const activeConnectors  = connectors.filter(c=>c.connected).length;
@@ -625,79 +603,44 @@ export default function App({ initial }: LotusBuilderProps) {
   ];
 
   return (
-    <div className={`size-full flex flex-col overflow-hidden ${resolvedTheme === "dark" ? "dark" : ""}`} style={{ fontFamily:"Outfit,sans-serif", background:"var(--background)" }}>
+    <div className="relative size-full flex flex-col overflow-hidden bg-[#fffdfb] text-[#241b16] lg:pl-[248px]" style={{ fontFamily:"Outfit,sans-serif" }}>
+
+      {mobileNavOpen && <button type="button" aria-label="Close navigation overlay" onClick={()=>setMobileNavOpen(false)} className="fixed inset-0 z-40 bg-black/25 lg:hidden"/>}
+      <aside className={`fixed inset-y-0 left-0 z-50 flex w-[248px] flex-col border-r border-[#eadfd8] bg-[#fffcfa] px-5 pb-5 pt-7 transition-transform lg:translate-x-0 ${mobileNavOpen ? "translate-x-0" : "-translate-x-full"}`} aria-label="Lotus navigation">
+        <button type="button" onClick={()=>setMobileNavOpen(false)} aria-label="Close navigation" className="absolute right-3 top-3 rounded-lg p-2 lg:hidden"><X size={18}/></button>
+        <div className="flex flex-col items-center pt-2">
+          <Image src={logoLotus} alt="Lotus" width={124} height={124} loading="eager" className="h-[124px] w-[124px] object-contain" />
+          <p className="-mt-1 text-[10px] font-semibold tracking-[0.32em] text-[#5d4538]">APP BUILDER</p>
+        </div>
+        <nav className="mt-8 grid gap-1.5">
+          <Link href="/" className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-[#5f4a3f] hover:bg-[#fff6f0]"><Folder size={19}/>Projects</Link>
+          <Link href="/?section=templates" className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-[#5f4a3f] hover:bg-[#fff6f0]"><Grid2X2 size={19}/>Templates</Link>
+          <button type="button" onClick={()=>{setView("preview");setMobileNavOpen(false)}} className="flex items-center gap-3 rounded-xl bg-[#fff0e5] px-4 py-3 text-left text-sm font-semibold text-[#3c2a20]"><Eye size={19}/>Preview</button>
+          <Link href="/?section=deploy" className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-[#5f4a3f] hover:bg-[#fff6f0]"><Rocket size={19}/>Deploy</Link>
+        </nav>
+        <nav className="mt-auto border-t border-[#eadfd8] pt-4"><Link href="/?section=settings" className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-[#5f4a3f] hover:bg-[#fff6f0]"><Settings size={19}/>Settings</Link></nav>
+        <div className="mt-4 flex items-center gap-3 rounded-xl border border-[#eadfd8] bg-white px-3 py-3">
+          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#ffb887] text-sm font-semibold">{initial.userName.trim().slice(0,2).toUpperCase() || "DU"}</span>
+          <div className="min-w-0"><p className="truncate text-sm font-semibold">{initial.userName}</p><p className="text-xs text-[#806b60]">Founder</p></div>
+          <ChevronDown className="ml-auto -rotate-90" size={16}/>
+        </div>
+      </aside>
 
       {/* ── Top bar ── */}
-      <header className="flex-shrink-0 flex items-center justify-between px-5" style={{ height:60, borderBottom:"1px solid var(--border)", background:"var(--card)" }}>
+      <header className="flex h-[132px] flex-shrink-0 items-center justify-between gap-4 border-b border-[#f1e8e3] bg-[#fffdfb] px-5 sm:px-8 lg:px-14">
 
         {/* Logo */}
-        <div className="flex items-center gap-2.5 min-w-0">
-          <Image src={logoLotus} alt="Lotus" width={50} height={50} style={{ objectFit:"contain" }}/>
-          <span style={{ fontFamily:"Fraunces,serif", fontWeight:500, fontSize:21, color:"var(--foreground)", letterSpacing:"-0.02em" }}>Lotus</span>
-          {projectId && (
-            <>
-              <div className="h-4 w-px" style={{ background:"var(--border)" }}/>
-              <span className="truncate max-w-[180px]" title={projectName}
-                style={{ fontSize:13, fontWeight:500, color:"var(--muted-foreground)" }}>{projectName}</span>
-            </>
-          )}
+        <div className="flex min-w-0 items-center gap-3">
+          <button type="button" onClick={()=>setMobileNavOpen(true)} aria-label="Open navigation" className="rounded-lg p-2 lg:hidden"><Menu size={21}/></button>
+          <div className="min-w-0">
+          <h1 className="text-3xl font-bold tracking-tight text-black sm:text-4xl">App Builder</h1>
+          <p className="mt-2 text-sm text-[#6c584d] sm:text-base">Describe, preview, and deploy your app.</p>
+          </div>
         </div>
 
         {/* Right actions */}
         <div className="flex items-center gap-2">
-          {/* Undo/Redo */}
-          <div className="flex items-center gap-0.5">
-            <button onClick={()=>goToHistory(historyIdx-1)} disabled={historyIdx===0}
-              title={historyIdx>0 ? `Undo · ${history[historyIdx-1].label}` : "Nothing to undo"}
-              className="p-1.5 rounded-lg transition-all hover:opacity-80" style={{ color:historyIdx===0?"var(--muted-foreground)":"var(--foreground)", opacity:historyIdx===0?0.4:1 }}>
-              <Undo2 size={13}/>
-            </button>
-            <button onClick={()=>goToHistory(historyIdx+1)} disabled={historyIdx===history.length-1}
-              title={historyIdx<history.length-1 ? `Redo · ${history[historyIdx+1].label}` : "Nothing to redo"}
-              className="p-1.5 rounded-lg transition-all hover:opacity-80" style={{ color:historyIdx===history.length-1?"var(--muted-foreground)":"var(--foreground)", opacity:historyIdx===history.length-1?0.4:1 }}>
-              <Redo2 size={13}/>
-            </button>
-          </div>
-          <div className="h-4 w-px mx-1" style={{ background:"var(--border)" }}/>
-          <button onClick={()=>setShowViewApp(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all hover:opacity-80"
-            style={{ background:"var(--secondary)", color:"var(--secondary-foreground)", border:"1px solid var(--border)" }}>
-            <Eye size={11}/> View App
-          </button>
-          <motion.button whileTap={{ scale:0.97 }} onClick={()=>setView("deployed")}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold"
-            style={{ background:"linear-gradient(135deg,#D4A030,#B87820)", color:"#FFF8E8", boxShadow:"0 2px 12px rgba(200,146,42,0.35)" }}>
-            <Zap size={11}/> Share
-          </motion.button>
-          <div className="h-4 w-px mx-1" style={{ background:"var(--border)" }}/>
-          <div className="relative" ref={accountMenuRef}>
-            <button
-              type="button"
-              onClick={()=>setShowAccount(open=>!open)}
-              aria-label={`Open workspace menu for ${initial.userName}`}
-              aria-haspopup="menu"
-              aria-expanded={showAccount}
-              className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold transition-all hover:opacity-80"
-              style={{ background:"var(--primary)", color:"var(--primary-foreground)" }}>
-              {initial.userName.trim().charAt(0).toUpperCase() || "U"}
-            </button>
-            <AnimatePresence>
-              {showAccount && (
-                <motion.div
-                  role="menu"
-                  initial={{ opacity:0, y:-6, scale:0.97 }}
-                  animate={{ opacity:1, y:0, scale:1 }}
-                  exit={{ opacity:0, y:-4, scale:0.97 }}
-                  className="absolute right-0 top-full mt-2 z-50 min-w-48 rounded-xl p-1.5"
-                  style={{ background:"var(--card)", border:"1px solid var(--border)", boxShadow:"0 8px 32px rgba(0,0,0,0.13)" }}>
-                  <div className="px-3 py-2 border-b" style={{ borderColor:"var(--border)" }}>
-                    <p className="text-xs font-semibold truncate" style={{ color:"var(--foreground)" }}>{initial.userName}</p>
-                    <p className="text-[10px]" style={{ color:"var(--muted-foreground)" }}>Public workspace</p>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+          <Link href="/docs" className="hidden h-12 items-center gap-2 rounded-xl border border-[#eadfd8] bg-white px-5 text-sm font-semibold text-[#49382f] shadow-sm sm:flex"><BookOpen size={21}/>Docs</Link>
         </div>
       </header>
 
@@ -705,7 +648,7 @@ export default function App({ initial }: LotusBuilderProps) {
       <div className="flex-1 flex overflow-hidden min-h-0">
 
         {/* ── Chat panel ── */}
-        <aside className="flex flex-col flex-shrink-0 overflow-hidden" style={{ width:256, borderRight:"1px solid var(--border)", background:"var(--card)" }}>
+        <aside className="hidden flex-col flex-shrink-0 overflow-hidden" style={{ width:256, borderRight:"1px solid var(--border)", background:"var(--card)" }}>
 
           {/* Tab: Chat only */}
           <div className="flex-shrink-0 flex items-center px-3 pt-3 pb-0" style={{ borderBottom:"1px solid var(--border)" }}>
@@ -873,16 +816,16 @@ export default function App({ initial }: LotusBuilderProps) {
         </aside>
 
         {/* ── Preview / Code / Deployed ── */}
-        <main className="flex-1 flex flex-col overflow-hidden" style={{ background:"var(--background)" }}>
+        <main className="flex-1 flex flex-col overflow-hidden bg-[#fffdfb] px-4 pb-4 sm:px-7 lg:px-8 lg:pb-7">
 
           {/* Preview toolbar */}
-          <div className="flex-shrink-0 flex items-center justify-between px-4 py-2" style={{ borderBottom:"1px solid var(--border)", background:"var(--card)" }}>
+          <div className="flex-shrink-0 flex items-center justify-between py-3">
             {/* View tabs */}
-            <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background:"var(--muted)" }}>
+            <div className="flex items-center gap-1 rounded-xl bg-[#fff4ed] p-1">
               {([["preview","Preview",<Eye key="preview" size={11}/>],["code","Code",<Code2 key="code" size={11}/>],["deployed","Deployed",<Zap key="deployed" size={11}/>]] as const).map(([k,l,icon])=>(
                 <button key={k} onClick={()=>setView(k as BuildView)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
-                  style={{ background:view===k?"var(--card)":"transparent", color:view===k?"var(--foreground)":"var(--muted-foreground)", boxShadow:view===k?"0 1px 4px rgba(0,0,0,0.08)":"none" }}>
+                  style={{ background:view===k?"#fff":"transparent", color:view===k?"#2b211b":"#806b60", boxShadow:view===k?"0 1px 5px rgba(79,49,31,0.09)":"none" }}>
                   {icon}{l}
                 </button>
               ))}
@@ -903,8 +846,8 @@ export default function App({ initial }: LotusBuilderProps) {
 
 
           {/* View content */}
-          {view==="preview" && (generatedHtml || previewDiagnostics.length > 0) && <div className="min-h-0 flex-1"><PreviewWorkbench key={dragKey} html={generatedHtml ?? ""} diagnostics={previewDiagnostics} initialDevice={initial.defaultDevice}/></div>}
-          {view==="preview" && !generatedHtml && previewDiagnostics.length === 0 && <div className="min-h-0 flex-1"><EmptyPreview/></div>}
+          {view==="preview" && (generatedHtml || previewDiagnostics.length > 0) && <div className="min-h-0 flex-1 overflow-hidden rounded-[20px] border border-[#eadfd8] bg-white shadow-[0_12px_40px_rgba(93,56,34,0.07)]"><PreviewWorkbench key={dragKey} html={generatedHtml ?? ""} diagnostics={previewDiagnostics} initialDevice={initial.defaultDevice}/></div>}
+          {view==="preview" && !generatedHtml && previewDiagnostics.length === 0 && <div className="min-h-0 flex-1 overflow-hidden rounded-[20px] border border-[#eadfd8] bg-white"><EmptyPreview/></div>}
 
           {projectId
             ? <div className={view === "code" ? "flex min-h-0 flex-1" : "hidden"} aria-hidden={view !== "code"}>
@@ -923,19 +866,25 @@ export default function App({ initial }: LotusBuilderProps) {
             : view === "code" && <div className="flex flex-1 items-center justify-center text-sm" style={{ color:"var(--muted-foreground)" }}>Create the project before editing files.</div>}
           {view==="deployed" && <DeployedPanel html={generatedHtml} projectName={projectName}/>}
 
+          {view === "preview" && <div className="mt-4 flex flex-shrink-0 items-center gap-3 rounded-[18px] border border-[#eadfd8] bg-white p-3 shadow-[0_10px_30px_rgba(93,56,34,0.08)] sm:p-4">
+            <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl border border-[#f0e2d9] text-[#f29a70] shadow-sm"><Sparkles size={25}/></span>
+            <textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); handleSend(); } }} rows={1} placeholder="Describe the app you want to build..." className="min-w-0 flex-1 resize-none bg-transparent px-2 py-3 text-base text-[#2d211b] outline-none placeholder:text-[#806b60]"/>
+            <motion.button whileTap={{scale:0.98}} onClick={()=>handleSend()} disabled={!input.trim() || isTyping} className="inline-flex h-12 flex-shrink-0 items-center gap-2 rounded-xl bg-gradient-to-r from-[#ffb17f] to-[#e8835f] px-4 text-sm font-semibold text-white shadow-[0_7px_20px_rgba(232,131,95,0.3)] disabled:opacity-60 sm:px-7 sm:text-base"><Sparkles size={19}/><span className="hidden sm:inline">Generate App</span><span className="sm:hidden">Generate</span></motion.button>
+          </div>}
+
           {/* Active build context bar */}
           <div className="flex-shrink-0 flex items-center justify-between px-4 py-1.5" style={{ borderTop:"1px solid var(--border)", background:"var(--card)" }}>
             <div className="flex items-center gap-2 flex-wrap">
               <span style={{ fontFamily:"DM Mono,monospace", fontSize:9, color:"var(--accent)", fontWeight:600 }}>{selectedModel}</span>
               {[
-                { count:activeConnectors, label:"Connector" },
-                { count:activeSkills,     label:"Skill" },
-                { count:activeAgents,     label:"Agent" },
-                { count:activeCaps,       label:"Capability" },
-                { count:uploadedFiles.length, label:"File" },
+                { count:activeConnectors, label:"Connector", plural:"Connectors" },
+                { count:activeSkills,     label:"Skill", plural:"Skills" },
+                { count:activeAgents,     label:"Agent", plural:"Agents" },
+                { count:activeCaps,       label:"Capability", plural:"Capabilities" },
+                { count:uploadedFiles.length, label:"File", plural:"Files" },
               ].map(item=>(
                 item.count>0 && <span key={item.label} style={{ fontSize:9, color:"var(--muted-foreground)", fontFamily:"DM Mono,monospace" }}>
-                  · {item.count} {item.label}{item.count!==1?"s":""}
+                  · {item.count} {item.count === 1 ? item.label : item.plural}
                 </span>
               ))}
             </div>

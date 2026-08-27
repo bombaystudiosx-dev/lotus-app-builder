@@ -74,6 +74,7 @@ import {
   archiveProjectAction,
   buildProjectPreviewAction,
   createBlankProjectAction,
+  createTemplateProjectAction,
   createProjectFileAction,
   duplicateProjectAction,
   getProjectDashboard,
@@ -220,6 +221,21 @@ describe('authenticated project and file actions', () => {
     mocks.getRuntime.mockResolvedValue(null)
 
     await expect(renameProjectFileAction('project-1', 'file-1', 'src/index.html')).resolves.toMatchObject({ entryPath: 'index.html' })
+  })
+
+  it('creates a real persisted project from an approved starter template', async () => {
+    const templateEntry = { ...file, id: 'template-entry', updatedAt: new Date(700) }
+    mocks.createBlank.mockResolvedValue({ id: 'template-project', name: 'SaaS Starter' })
+    mocks.getRuntime.mockResolvedValue({ entryPath: 'index.html' })
+    mocks.getFileByPath.mockResolvedValue(templateEntry)
+
+    await expect(createTemplateProjectAction('saas-starter')).resolves.toMatchObject({ id: 'template-project' })
+    expect(mocks.createBlank).toHaveBeenCalledWith('user-a', 'SaaS Starter')
+    expect(mocks.updateFile).toHaveBeenCalledWith('user-a', 'template-project', 'template-entry', expect.objectContaining({
+      content: expect.stringContaining('Build your next product'),
+      expectedUpdatedAt: templateEntry.updatedAt,
+    }))
+    await expect(createTemplateProjectAction('not-real')).rejects.toThrow('Template not found')
   })
 
   it('uses the public guest workspace when the session is missing', async () => {

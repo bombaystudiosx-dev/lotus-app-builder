@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Download, Monitor, RefreshCw, RotateCw, Smartphone, Tablet } from 'lucide-react'
+import { Download, Expand, Maximize2, Monitor, Move, RefreshCw, RotateCw, Smartphone, Tablet } from 'lucide-react'
 import { LivePreview } from '@/components/lotus/live-preview'
 import { previewViewport, type PreviewDevice, type PreviewDiagnostic, type PreviewOrientation } from '@/lib/preview-runtime'
 
@@ -31,19 +31,30 @@ const DEVICE_OPTIONS: Array<{ value: PreviewDevice; label: string; icon: React.R
   { value: 'custom', label: 'Custom viewport', icon: <span className="text-[10px] font-bold">W×H</span> },
 ]
 
+const DESKTOP_PRESETS = [
+  { label: 'Sm', width: 640, height: 800 },
+  { label: 'Md', width: 768, height: 900 },
+  { label: 'Lg', width: 1024, height: 768 },
+  { label: 'XL', width: 1280, height: 800 },
+  { label: '2XL', width: 1440, height: 900 },
+]
+
 export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phone' }: PreviewWorkbenchProps) {
   const [device, setDevice] = useState<PreviewDevice>(initialDevice)
-  const [orientation, setOrientation] = useState<PreviewOrientation>('portrait')
+  const [orientation, setOrientation] = useState<PreviewOrientation>(initialDevice === 'desktop' ? 'landscape' : 'portrait')
   const [zoom, setZoom] = useState(75)
+  const [fitToStage, setFitToStage] = useState(true)
   const [position, setPosition] = useState({ x: 0, y: 0 })
   const [customWidth, setCustomWidth] = useState(390)
   const [customHeight, setCustomHeight] = useState(844)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [manualHtml, setManualHtml] = useState(html)
   const [revision, setRevision] = useState(0)
-  const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([])
+  const [, setConsoleEntries] = useState<ConsoleEntry[]>([])
   const [runtimeError, setRuntimeError] = useState<RuntimeError | null>(null)
+  const [stageSize, setStageSize] = useState({ width: 0, height: 0 })
   const frameRef = useRef<HTMLIFrameElement>(null)
+  const stageRef = useRef<HTMLDivElement>(null)
   const nextConsoleId = useRef(0)
   const messageBudget = useRef({ startedAt: 0, count: 0 })
   const runtimeChannel = useRef<string | null>(null)
@@ -83,7 +94,22 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
   }, [])
 
   const viewport = useMemo(() => previewViewport({ device, orientation, zoom, customWidth, customHeight }), [customHeight, customWidth, device, orientation, zoom])
+  const browserChromeHeight = device === 'desktop' || device === 'custom' ? 38 : 0
+  const displayScale = fitToStage && stageSize.width > 0 && stageSize.height > 0
+    ? Math.min(1, Math.max(0.25, Math.min((stageSize.width - 48) / viewport.width, (stageSize.height - 48) / (viewport.height + browserChromeHeight))))
+    : viewport.scale
   const displayHtml = autoRefresh ? html : manualHtml
+
+  useEffect(() => {
+    const stage = stageRef.current
+    if (!stage) return
+    const update = () => setStageSize({ width: stage.clientWidth, height: stage.clientHeight })
+    update()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(update)
+    observer.observe(stage)
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     runtimeChannel.current = null
@@ -123,6 +149,7 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
   function beginResize(event: React.PointerEvent<HTMLButtonElement>) {
     event.preventDefault()
     event.stopPropagation()
+    setFitToStage(false)
     const start = { x: event.clientX, y: event.clientY, zoom }
     const move = (pointerEvent: PointerEvent) => {
       const delta = ((pointerEvent.clientX - start.x) + (pointerEvent.clientY - start.y)) / 2
@@ -136,36 +163,68 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
     window.addEventListener('pointerup', finish, { once: true })
   }
 
-  return <section aria-label="Preview workbench" className="flex h-full min-h-0 flex-col bg-[var(--background)]">
-    <div className="flex flex-wrap items-center gap-1 border-b bg-[var(--card)] px-2 py-1.5">
-      <div role="group" aria-label="Preview device" className="flex items-center gap-0.5">
-        {DEVICE_OPTIONS.map((option) => <button key={option.value} type="button" aria-label={option.label} aria-pressed={device === option.value} onClick={() => setDevice(option.value)} className="rounded-md p-1.5 text-[var(--muted-foreground)] aria-pressed:bg-[var(--muted)] aria-pressed:text-[var(--foreground)]">{option.icon}</button>)}
+  function chooseDevice(nextDevice: PreviewDevice) {
+    setDevice(nextDevice)
+    setOrientation(nextDevice === 'desktop' ? 'landscape' : 'portrait')
+    setPosition({ x: 0, y: 0 })
+    setFitToStage(true)
+  }
+
+  function choosePreset(width: number, height: number) {
+    setDevice('custom')
+    setOrientation(width >= height ? 'landscape' : 'portrait')
+    setCustomWidth(width)
+    setCustomHeight(height)
+    setPosition({ x: 0, y: 0 })
+    setFitToStage(true)
+  }
+
+  return <section aria-label="Preview workbench" className="flex h-full min-h-0 flex-col bg-white">
+    <div className="flex min-h-[78px] flex-wrap items-center gap-3 border-b border-[#f0e5de] bg-white px-5 py-3 lg:px-7">
+      <div className="mr-auto flex min-w-[190px] items-start gap-3">
+        <span className="mt-1.5 h-3.5 w-3.5 rounded-full bg-[#ffad7d]" aria-hidden="true" />
+        <div><h2 className="text-base font-semibold text-[#211914]">Live Preview</h2><p className="mt-1 text-xs text-[#806b60]">Preview updated in real-time</p></div>
       </div>
-      <button type="button" aria-label="Rotate viewport" onClick={() => setOrientation((value) => value === 'portrait' ? 'landscape' : 'portrait')} className="rounded-md p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--muted)]"><RotateCw size={13}/></button>
+      <div role="group" aria-label="Preview device" className="flex overflow-hidden rounded-xl border border-[#eadfd8] bg-[#fffdfb] shadow-sm">
+        {DEVICE_OPTIONS.slice(0, 3).map((option) => <button key={option.value} type="button" aria-label={option.label} aria-pressed={device === option.value} onClick={() => chooseDevice(option.value)} className="inline-flex h-10 min-w-[86px] items-center justify-center gap-2 border-r border-[#eadfd8] px-3 text-sm font-medium text-[#332721] transition-colors last:border-r-0 hover:bg-[#fff2e8] aria-pressed:bg-[#ffe2ce]">{option.icon}<span>{option.value[0].toUpperCase() + option.value.slice(1)}</span></button>)}
+      </div>
+      <button type="button" aria-label="Refresh preview" onClick={refresh} className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#eadfd8] bg-white text-[#332721] shadow-sm hover:bg-[#fff4ed]"><RefreshCw size={17}/></button>
+    </div>
+    <div className="flex min-h-11 flex-wrap items-center gap-1.5 border-b border-[#f0e5de] bg-[#fffdfb] px-4 py-1.5">
+      <button type="button" aria-label="Custom viewport" aria-pressed={device === 'custom'} onClick={() => chooseDevice('custom')} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-[11px] font-semibold text-[#806b60] hover:bg-[#fff0e5] aria-pressed:bg-[#ffe2ce] aria-pressed:text-[#332721]">W×H <span className="hidden sm:inline">Responsive</span></button>
+      <div className="hidden items-center gap-0.5 border-l border-[var(--border)] pl-1.5 lg:flex" aria-label="Desktop breakpoint presets">
+        {DESKTOP_PRESETS.map((preset) => <button key={preset.label} type="button" aria-label={`${preset.width} pixel viewport`} onClick={() => choosePreset(preset.width, preset.height)} className={`h-8 rounded-md px-2 text-[10px] font-semibold transition-colors hover:bg-[var(--muted)] ${viewport.width === preset.width && viewport.height === preset.height ? 'bg-[var(--muted)] text-[var(--accent)]' : 'text-[var(--muted-foreground)]'}`}>{preset.label}<span className="ml-1 hidden 2xl:inline font-normal">{preset.width}</span></button>)}
+      </div>
+      <button type="button" aria-label="Rotate viewport" onClick={() => setOrientation((value) => value === 'portrait' ? 'landscape' : 'portrait')} className="rounded-md p-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)]"><RotateCw size={14}/></button>
       {device === 'custom' && <div className="flex items-center gap-1">
         <input aria-label="Viewport width" type="number" min={240} max={2560} value={customWidth} onChange={(event) => setCustomWidth(Number(event.target.value))} className="w-16 rounded border bg-transparent px-1 py-0.5 text-[10px]"/>
         <span className="text-[10px] text-[var(--muted-foreground)]">×</span>
         <input aria-label="Viewport height" type="number" min={240} max={2560} value={customHeight} onChange={(event) => setCustomHeight(Number(event.target.value))} className="w-16 rounded border bg-transparent px-1 py-0.5 text-[10px]"/>
       </div>}
-      <label className="ml-1 flex items-center gap-1 text-[10px] text-[var(--muted-foreground)]">
-        <span>Zoom</span><input aria-label="Preview zoom" type="range" min={25} max={200} step={1} value={zoom} onChange={(event) => setZoom(Number(event.target.value))} className="w-20"/>
+      <span className="rounded-md border border-[var(--border)] bg-[var(--background)] px-2.5 py-1.5 text-[11px] font-medium tabular-nums text-[var(--foreground)]">{viewport.width} × {viewport.height}</span>
+      <button type="button" aria-label="Fit preview to stage" aria-pressed={fitToStage} onClick={() => setFitToStage((value) => !value)} className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--border)] px-2 text-[10px] font-semibold text-[var(--muted-foreground)] aria-pressed:bg-[var(--muted)] aria-pressed:text-[var(--foreground)]"><Expand size={12}/> Fit</button>
+      <label className="flex h-8 items-center gap-1 rounded-md border border-[var(--border)] px-2 text-[10px] text-[var(--muted-foreground)]">
+        <span>{fitToStage ? `${Math.round(displayScale * 100)}%` : `${zoom}%`}</span><input aria-label="Preview zoom" type="range" min={25} max={200} step={1} value={fitToStage ? Math.round(displayScale * 100) : zoom} onChange={(event) => { setFitToStage(false); setZoom(Number(event.target.value)) }} className="w-16"/>
       </label>
-      <span className="text-[10px] tabular-nums text-[var(--muted-foreground)]">{viewport.width} × {viewport.height} · {Math.round(viewport.scale * 100)}%</span>
       <div className="ml-auto flex items-center gap-1">
         <label className="flex items-center gap-1 text-[10px] text-[var(--muted-foreground)]"><input aria-label="Auto-refresh preview" type="checkbox" checked={autoRefresh} onChange={(event) => { if (!event.target.checked) setManualHtml(html); setAutoRefresh(event.target.checked) }}/> Auto</label>
-        <button type="button" aria-label="Refresh preview" onClick={refresh} className="rounded-md p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--muted)]"><RefreshCw size={13}/></button>
         <button type="button" aria-label="Download preview HTML" onClick={downloadPreview} className="rounded-md p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--muted)]"><Download size={13}/></button>
       </div>
     </div>
 
-    <div className="min-h-0 flex-1 overflow-auto bg-[radial-gradient(circle,rgba(44,34,20,0.08)_1px,transparent_1px)] bg-[length:22px_22px] p-6">
+    <div ref={stageRef} className="relative min-h-0 flex-1 overflow-auto bg-[radial-gradient(circle_at_48%_20%,rgba(255,255,255,0.96),transparent_28%),radial-gradient(circle_at_15%_80%,rgba(248,187,149,0.5),transparent_38%),radial-gradient(circle_at_88%_75%,rgba(255,215,190,0.66),transparent_42%),linear-gradient(135deg,#fff9f5_0%,#f8dfd0_55%,#fff7f1_100%)] p-6">
       <div
-        role={device === 'phone' ? 'region' : undefined}
-        aria-label={device === 'phone' ? 'Phone preview screen' : undefined}
-        className={`relative mx-auto origin-top-left shadow-2xl ${device === 'phone' ? 'overflow-hidden rounded-[2.75rem] border-[10px] border-[#17120d] bg-[#17120d]' : ''}`}
-        style={{ width: viewport.width, height: viewport.height, boxSizing: 'content-box', transform: `translate(${position.x}px, ${position.y}px) scale(${viewport.scale})`, marginBottom: viewport.height * (viewport.scale - 1), marginRight: viewport.width * (viewport.scale - 1) }}
+        role="region"
+        aria-label={device === 'phone' ? 'Phone preview screen' : device === 'tablet' ? 'Tablet preview screen' : 'Desktop preview screen'}
+        className={`relative origin-top-left shadow-2xl ${device === 'phone' ? 'overflow-hidden rounded-[2.75rem] border-[10px] border-[#17120d] bg-[#17120d]' : 'overflow-hidden rounded-lg border border-black/20 bg-white'}`}
+        style={{ width: viewport.width, height: viewport.height + browserChromeHeight, boxSizing: 'content-box', transform: `translate(${position.x}px, ${position.y}px) scale(${displayScale})`, marginLeft: Math.max(0, (stageSize.width - 48 - viewport.width * displayScale) / 2), marginBottom: (viewport.height + browserChromeHeight) * (displayScale - 1), marginRight: viewport.width * (displayScale - 1) }}
       >
-        <LivePreview ref={frameRef} html={displayHtml} revision={revision}/>
+        {browserChromeHeight > 0 && <div className="flex h-[38px] items-center gap-2 border-b border-black/10 bg-[#f4f1eb] px-3 text-[#6b6258]">
+          <span className="h-2.5 w-2.5 rounded-full bg-[#ef6b5b]"/><span className="h-2.5 w-2.5 rounded-full bg-[#e8b64f]"/><span className="h-2.5 w-2.5 rounded-full bg-[#65bd69]"/>
+          <div className="ml-2 flex h-6 flex-1 items-center rounded-md bg-white/90 px-3 text-[10px] text-[#8a8178]">https://preview.lotus.local</div>
+          <Maximize2 size={13}/>
+        </div>}
+        <div style={{ width: viewport.width, height: viewport.height }}><LivePreview ref={frameRef} html={displayHtml} revision={revision}/></div>
         {device === 'phone' && <>
           <button
             type="button"
@@ -195,6 +254,7 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
             <span aria-hidden="true" className="absolute bottom-2 right-2 h-3 w-3 border-b-2 border-r-2 border-white/80" />
           </button>
         </>}
+        {device !== 'phone' && <button type="button" aria-label="Move desktop preview" title="Drag to move preview" onPointerDown={beginMove} className="absolute right-2 top-1 z-30 inline-flex h-7 w-7 cursor-move touch-none items-center justify-center rounded-md text-[#6b6258] hover:bg-black/5"><Move size={13}/></button>}
         {(runtimeError || diagnostics.some((item) => item.severity === 'error')) && <div role="alert" className="absolute inset-x-4 top-4 z-10 rounded-lg border border-red-400/40 bg-red-950/95 p-3 text-xs text-red-100 shadow-xl">
           <p className="font-semibold">Preview could not run</p>
           {runtimeError && <p>{runtimeError.message}{runtimeError.source ? ` · ${runtimeError.source}:${runtimeError.line ?? 0}:${runtimeError.column ?? 0}` : ''}</p>}
@@ -203,10 +263,5 @@ export function PreviewWorkbench({ html, diagnostics = [], initialDevice = 'phon
       </div>
     </div>
 
-    <div aria-label="Preview console" className="h-24 shrink-0 overflow-y-auto border-t bg-[#111] px-3 py-2 font-mono text-[10px] text-[#ddd]">
-      <div className="mb-1 flex items-center justify-between text-[#999]"><span>Preview console</span><button type="button" onClick={() => setConsoleEntries([])} className="hover:text-white">Clear</button></div>
-      {consoleEntries.length === 0 && <p className="text-[#777]">Console output will appear here.</p>}
-      {consoleEntries.map((entry) => <p key={entry.id} className={entry.level === 'error' ? 'text-red-300' : entry.level === 'warn' ? 'text-amber-200' : ''}>[{entry.level}] {entry.text}</p>)}
-    </div>
   </section>
 }
