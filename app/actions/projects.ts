@@ -7,6 +7,8 @@ import { revalidatePath } from 'next/cache'
 import { generateText } from 'ai'
 import { redactSensitiveValues } from '@/lib/safety'
 import { createProjectService } from '@/lib/projects'
+import { createPostgresProjectService } from '@/lib/postgres-projects'
+import { postgresPool, rows } from '@/lib/db/postgres'
 import { assembleStaticPreview, type PreviewBuild } from '@/lib/preview-runtime'
 import type { ProjectSpecification } from '@/lib/project-specification'
 import { ensureGuestWorkspace } from '@/lib/guest-workspace'
@@ -14,6 +16,11 @@ import { cookies } from 'next/headers'
 import { AI_PROVIDER_COOKIE, aiProviderSchema, aiProviderStatus, decryptAiProviderConfig, defaultAiProviderConfig, encryptAiProviderConfig, generationModel, type AiProviderStatus } from '@/lib/ai-provider'
 
 async function getUserId() {
+  if (usePostgres) {
+    await postgresPool.query(`INSERT INTO "user" (id, name, email, "emailVerified") VALUES ($1, $2, $3, true)
+      ON CONFLICT (id) DO NOTHING`, ['lotus-public-guest', 'Lotus Guest', 'guest@lotus.local'])
+    return 'lotus-public-guest'
+  }
   return ensureGuestWorkspace(sqlite)
 }
 
@@ -21,7 +28,24 @@ function id() {
   return crypto.randomUUID()
 }
 
-const projects = createProjectService(db)
+const usePostgres = Boolean(process.env.DATABASE_URL) && process.env.NODE_ENV !== 'test'
+const projects = usePostgres
+  ? createPostgresProjectService(postgresPool)
+  : createProjectService(db)
+
+async function listProjectMessages(projectId: string, userId: string) {
+  if (usePostgres) return rows<{ id: string; role: string; content: string; createdAt: Date }>(postgresPool,
+    'SELECT id, role, content, "createdAt" FROM message WHERE "projectId" = $1 AND "userId" = $2 ORDER BY "createdAt"', [projectId, userId])
+  return db.select().from(message).where(and(eq(message.projectId, projectId), eq(message.userId, userId))).orderBy(asc(message.createdAt))
+}
+
+async function appendProjectMessage(input: { id: string; projectId: string; userId: string; role: 'user' | 'assistant'; content: string }) {
+  if (usePostgres) {
+    await postgresPool.query('INSERT INTO message (id, "projectId", "userId", role, content) VALUES ($1, $2, $3, $4, $5)', [input.id, input.projectId, input.userId, input.role, input.content])
+    return
+  }
+  await db.insert(message).values(input)
+}
 const activePreviewBuilds = new Map<string, { revision: number; controller: AbortController }>()
 
 function fileDto(file: Awaited<ReturnType<typeof projects.getFile>> extends infer Result ? NonNullable<Result> : never) {
@@ -225,11 +249,7 @@ export async function getWorkspace(projectId: string): Promise<Workspace | null>
   const proj = await projects.get(userId, projectId)
   if (!proj || proj.status !== 'active') return null
 
-  const rows = await db
-    .select()
-    .from(message)
-    .where(and(eq(message.projectId, proj.id), eq(message.userId, userId)))
-    .orderBy(asc(message.createdAt))
+  const messageRows = await listProjectMessages(proj.id, userId)
 
   const [runtime, files, specification] = await Promise.all([
     projects.getRuntime(userId, proj.id),
@@ -246,7 +266,7 @@ export async function getWorkspace(projectId: string): Promise<Workspace | null>
     entryPath,
     runtime: runtime?.runtime ?? 'static',
     specification,
-    messages: rows.map((r) => ({
+    messages: messageRows.map((r) => ({
       id: r.id,
       role: r.role as 'user' | 'assistant',
       content: redactSensitiveValues(r.content),
@@ -337,7 +357,7 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
   const specificationBlock = `\n\nLotus project specification (treat this as the product contract; render the current web preview from it):\n${safeSpecification}`
 
   // Persist the user's message immediately.
-  await db.insert(message).values({
+  await appendProjectMessage({
     id: id(),
     projectId,
     userId,
@@ -379,7 +399,7 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
   // Persist the generated app + assistant reply.
   const updatedEntry = await projects.updateFile(userId, projectId, entry.id, { content: html, expectedUpdatedAt })
 
-  await db.insert(message).values({
+  await appendProjectMessage({
     id: id(),
     projectId,
     userId,

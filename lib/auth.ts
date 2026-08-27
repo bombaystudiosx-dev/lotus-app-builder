@@ -1,8 +1,9 @@
 import { betterAuth } from 'better-auth'
 import { sqlite } from '@/lib/db'
+import { postgresPool } from '@/lib/db/postgres'
 
 export const auth = betterAuth({
-  database: sqlite,
+  database: process.env.DATABASE_URL && process.env.NODE_ENV !== 'test' ? postgresPool : sqlite,
   baseURL:
     process.env.BETTER_AUTH_URL ??
     (process.env.VERCEL_PROJECT_PRODUCTION_URL
