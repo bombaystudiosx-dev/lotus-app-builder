@@ -65,6 +65,34 @@ describe('integration connections', () => {
     expect(JSON.stringify(validated.config)).not.toContain('temporary-google-access-token')
   })
 
+  it('verifies App Store Connect credentials with an ES256 team-key JWT', async () => {
+    const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+    const credential = JSON.stringify({
+      issuerId: crypto.randomUUID(),
+      keyId: 'ABC123DEFG',
+      privateKey: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+    })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(validateIntegrationInput({ provider: 'appstore', credential })).resolves.toMatchObject({ result: { accountLabel: 'App Store Connect · ABC123DEFG' } })
+    const authorization = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>
+    expect(authorization.Authorization.split('.')).toHaveLength(3)
+  })
+
+  it('verifies Google Play service-account credentials with the Android Publisher scope', async () => {
+    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+    const credential = JSON.stringify({
+      type: 'service_account', project_id: 'lotus-play', private_key_id: 'key-1',
+      private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+      client_email: 'play-publisher@lotus-play.iam.gserviceaccount.com',
+      token_uri: 'https://oauth2.googleapis.com/token',
+    })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ access_token: 'temporary-google-play-token' }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(validateIntegrationInput({ provider: 'googleplay', credential })).resolves.toMatchObject({ result: { accountLabel: 'play-publisher@lotus-play.iam.gserviceaccount.com' } })
+    expect(String((fetchMock.mock.calls[0][1] as RequestInit).body)).toContain('jwt-bearer')
+  })
+
   it('does not expose a rejected credential in the error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('unauthorized', { status: 401 })))
     const credential = 'github_pat_do-not-repeat-this'

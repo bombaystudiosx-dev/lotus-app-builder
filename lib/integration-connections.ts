@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, createHmac, createSign, r
 import { z } from 'zod'
 import { postgresPool, row, rows } from '@/lib/db/postgres'
 
-export const integrationProviderSchema = z.enum(['github', 'vercel', 'supabase', 'firebase'])
+export const integrationProviderSchema = z.enum(['github', 'vercel', 'supabase', 'firebase', 'appstore', 'googleplay'])
 export type IntegrationProvider = z.infer<typeof integrationProviderSchema>
 
 export const integrationConnectionInputSchema = z.object({
@@ -22,6 +22,8 @@ const firebaseServiceAccountSchema = z.object({
 type StoredConfig =
   | { provider: 'github' | 'vercel' | 'supabase'; token: string }
   | { provider: 'firebase'; serviceAccount: z.infer<typeof firebaseServiceAccountSchema> }
+  | { provider: 'appstore'; issuerId: string; keyId: string; privateKey: string }
+  | { provider: 'googleplay'; serviceAccount: z.infer<typeof firebaseServiceAccountSchema> }
 
 export interface IntegrationConnectionStatus {
   provider: IntegrationProvider
@@ -141,9 +143,52 @@ async function validateFirebase(credential: string): Promise<{ result: Validatio
   }
 }
 
+const appStoreCredentialSchema = z.object({
+  issuerId: z.string().uuid(),
+  keyId: z.string().regex(/^[A-Z0-9]{10}$/),
+  privateKey: z.string().min(100).max(8_000),
+})
+
+async function validateAppStore(credential: string): Promise<{ result: ValidationResult; config: StoredConfig }> {
+  let decoded: unknown
+  try { decoded = JSON.parse(credential) } catch { throw new Error('Apple requires valid App Store Connect credential JSON.') }
+  const config = appStoreCredentialSchema.parse(decoded)
+  const now = Math.floor(Date.now() / 1000)
+  const header = base64url(JSON.stringify({ alg: 'ES256', kid: config.keyId, typ: 'JWT' }))
+  const claims = base64url(JSON.stringify({ iss: config.issuerId, iat: now - 30, exp: now + 1_100, aud: 'appstoreconnect-v1' }))
+  const unsigned = `${header}.${claims}`
+  let signature: string
+  try { signature = createSign('SHA256').update(unsigned).end().sign({ key: config.privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url') } catch { throw new Error('Apple App Store Connect private key is invalid.') }
+  const response = await providerFetch('https://api.appstoreconnect.apple.com/v1/apps?limit=1', { headers: { Authorization: `Bearer ${unsigned}.${signature}` } })
+  if (!response.ok) throw new Error('Apple rejected those App Store Connect credentials.')
+  await responseJson(response)
+  return { result: { accountLabel: `App Store Connect · ${config.keyId}`, metadata: { keyId: config.keyId, issuerId: config.issuerId } }, config: { provider: 'appstore', ...config } }
+}
+
+async function validateGooglePlay(credential: string): Promise<{ result: ValidationResult; config: StoredConfig }> {
+  let decoded: unknown
+  try { decoded = JSON.parse(credential) } catch { throw new Error('Google Play requires valid service-account JSON.') }
+  const serviceAccount = firebaseServiceAccountSchema.parse(decoded)
+  const now = Math.floor(Date.now() / 1000)
+  const header = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT', kid: serviceAccount.private_key_id }))
+  const claims = base64url(JSON.stringify({ iss: serviceAccount.client_email, scope: 'https://www.googleapis.com/auth/androidpublisher', aud: serviceAccount.token_uri, iat: now, exp: now + 3_600 }))
+  const unsigned = `${header}.${claims}`
+  let signature: string
+  try { signature = createSign('RSA-SHA256').update(unsigned).end().sign(serviceAccount.private_key).toString('base64url') } catch { throw new Error('Google Play service-account private key is invalid.') }
+  const response = await providerFetch(serviceAccount.token_uri, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: `${unsigned}.${signature}` }),
+  })
+  if (!response.ok) throw new Error('Google rejected that Play Console service account.')
+  z.object({ access_token: z.string().min(20) }).parse(await responseJson(response))
+  return { result: { accountLabel: serviceAccount.client_email, metadata: { projectId: serviceAccount.project_id, clientEmail: serviceAccount.client_email } }, config: { provider: 'googleplay', serviceAccount } }
+}
+
 export async function validateIntegrationInput(input: unknown) {
   const parsed = integrationConnectionInputSchema.parse(input)
   if (parsed.provider === 'firebase') return validateFirebase(parsed.credential)
+  if (parsed.provider === 'appstore') return validateAppStore(parsed.credential)
+  if (parsed.provider === 'googleplay') return validateGooglePlay(parsed.credential)
   const result = await validateTokenProvider(parsed.provider, parsed.credential)
   return { result, config: { provider: parsed.provider, token: parsed.credential } as StoredConfig }
 }

@@ -22,13 +22,16 @@ const PROVIDERS: Array<{
   { id: 'vercel', name: 'Vercel', description: 'Access projects, deployments, and domains.', credentialLabel: 'Access token', placeholder: 'Paste a Vercel access token', docs: 'https://vercel.com/account/settings/tokens' },
   { id: 'supabase', name: 'Supabase', description: 'Connect projects, databases, and backend services.', credentialLabel: 'Personal access token', placeholder: 'sbp_…', docs: 'https://supabase.com/dashboard/account/tokens' },
   { id: 'firebase', name: 'Firebase', description: 'Verify a Firebase project through a Google service account.', credentialLabel: 'Service-account JSON', placeholder: '{\n  "type": "service_account",\n  "project_id": "…"\n}', docs: 'https://console.firebase.google.com/', multiline: true },
+  { id: 'appstore', name: 'Apple App Store Connect', description: 'Connect Apple apps, TestFlight, and App Store releases.', credentialLabel: 'App Store Connect credential JSON', placeholder: '{\n  "issuerId": "…",\n  "keyId": "…",\n  "privateKey": "-----BEGIN PRIVATE KEY-----\\n…"\n}', docs: 'https://appstoreconnect.apple.com/access/integrations/api', multiline: true },
+  { id: 'googleplay', name: 'Google Play Console', description: 'Connect Android publishing and Play release tracks.', credentialLabel: 'Google Play service-account JSON', placeholder: '{\n  "type": "service_account",\n  "project_id": "…"\n}', docs: 'https://play.google.com/console/developers/api-access', multiline: true },
 ]
 
 function emptyStatuses(): IntegrationConnectionStatus[] {
   return PROVIDERS.map(({ id }) => ({ provider: id, connected: false, accountLabel: '', status: 'disconnected', lastVerifiedAt: null }))
 }
 
-export function IntegrationSettings() {
+export function IntegrationSettings({ providerIds = ['github', 'vercel', 'supabase', 'firebase'] }: { providerIds?: IntegrationProvider[] }) {
+  const providers = PROVIDERS.filter(provider => providerIds.includes(provider.id))
   const [statuses, setStatuses] = useState(emptyStatuses)
   const [editing, setEditing] = useState<IntegrationProvider | null>(null)
   const [credential, setCredential] = useState('')
@@ -80,7 +83,7 @@ export function IntegrationSettings() {
     </div>
     {message && <div role="status" className={`mb-4 rounded-xl border px-3 py-2 text-sm ${/connected and verified/i.test(message) ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'}`}>{message}</div>}
     <div className="grid gap-3">
-      {PROVIDERS.map(provider => {
+      {providers.map(provider => {
         const status = statuses.find(item => item.provider === provider.id)!
         const open = editing === provider.id
         return <section key={provider.id} className="rounded-xl border border-[#eadfd8] p-4 dark:border-white/10">

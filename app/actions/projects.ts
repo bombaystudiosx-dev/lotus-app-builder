@@ -15,6 +15,7 @@ import { ensureGuestWorkspace } from '@/lib/guest-workspace'
 import { cookies } from 'next/headers'
 import { AI_PROVIDER_COOKIE, aiProviderSchema, aiProviderStatus, decryptAiProviderConfig, defaultAiProviderConfig, encryptAiProviderConfig, generationModel, type AiProviderStatus } from '@/lib/ai-provider'
 import { createIntegrationSessionToken, disconnectIntegration, listIntegrationStatuses, parseIntegrationSessionToken, saveIntegrationConnection, type IntegrationConnectionStatus, type IntegrationProvider } from '@/lib/integration-connections'
+import { getMobileDeploymentConfig, saveMobileDeploymentConfig, type MobileDeploymentConfig } from '@/lib/mobile-deployment'
 
 const INTEGRATION_SESSION_COOKIE = 'lotus-integration-session'
 
@@ -157,6 +158,30 @@ export async function disconnectIntegrationAction(provider: IntegrationProvider)
   const status = await disconnectIntegration(await getIntegrationUserId(), provider)
   refreshProjectViews()
   return status
+}
+
+export async function getMobileDeploymentConfigAction(projectId: string): Promise<MobileDeploymentConfig> {
+  if (!usePostgres) throw new Error('Persistent deployment storage is not configured.')
+  const project = await projects.get(await getUserId(), projectId)
+  if (!project || project.status !== 'active') throw new Error('Project not found.')
+  return getMobileDeploymentConfig(await getIntegrationUserId(), projectId)
+}
+
+export async function saveMobileDeploymentConfigAction(input: unknown): Promise<{ ok: true; config: MobileDeploymentConfig } | { ok: false; error: string }> {
+  if (!usePostgres) return { ok: false, error: 'Persistent deployment storage is not configured.' }
+  try {
+    const candidate = input && typeof input === 'object' ? input as { projectId?: unknown } : {}
+    if (typeof candidate.projectId !== 'string') throw new Error('Project not found.')
+    const project = await projects.get(await getUserId(), candidate.projectId)
+    if (!project || project.status !== 'active') throw new Error('Project not found.')
+    const config = await saveMobileDeploymentConfig(await getIntegrationUserId(), input)
+    refreshProjectViews(config.projectId)
+    return { ok: true, config }
+  } catch (error) {
+    const issue = error instanceof Error ? error.message : ''
+    const validation = issue.match(/"message":\s*"([^"]+)"/)?.[1]
+    return { ok: false, error: validation ?? 'Check the mobile app identifiers and try again.' }
+  }
 }
 
 export async function createBlankProjectAction(name?: string) {
