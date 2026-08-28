@@ -14,6 +14,9 @@ import type { ProjectSpecification } from '@/lib/project-specification'
 import { ensureGuestWorkspace } from '@/lib/guest-workspace'
 import { cookies } from 'next/headers'
 import { AI_PROVIDER_COOKIE, aiProviderSchema, aiProviderStatus, decryptAiProviderConfig, defaultAiProviderConfig, encryptAiProviderConfig, generationModel, type AiProviderStatus } from '@/lib/ai-provider'
+import { createIntegrationSessionToken, disconnectIntegration, listIntegrationStatuses, parseIntegrationSessionToken, saveIntegrationConnection, type IntegrationConnectionStatus, type IntegrationProvider } from '@/lib/integration-connections'
+
+const INTEGRATION_SESSION_COOKIE = 'lotus-integration-session'
 
 async function getUserId() {
   if (usePostgres) {
@@ -22,6 +25,24 @@ async function getUserId() {
     return 'lotus-public-guest'
   }
   return ensureGuestWorkspace(sqlite)
+}
+
+async function getIntegrationUserId() {
+  const cookieStore = await cookies()
+  let userId = parseIntegrationSessionToken(cookieStore.get(INTEGRATION_SESSION_COOKIE)?.value)
+  if (!userId) {
+    userId = crypto.randomUUID()
+    cookieStore.set(INTEGRATION_SESSION_COOKIE, createIntegrationSessionToken(userId), {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 365,
+    })
+  }
+  await postgresPool.query(`INSERT INTO "user" (id, name, email, "emailVerified") VALUES ($1, $2, $3, true)
+    ON CONFLICT (id) DO NOTHING`, [userId, 'Lotus Integration Owner', `${userId}@integration.lotus.local`])
+  return userId
 }
 
 function id() {
@@ -47,6 +68,18 @@ async function appendProjectMessage(input: { id: string; projectId: string; user
   await db.insert(message).values(input)
 }
 const activePreviewBuilds = new Map<string, { revision: number; controller: AbortController }>()
+const integrationAttempts = new Map<string, { startedAt: number; count: number }>()
+
+function claimIntegrationAttempt(userId: string) {
+  const now = Date.now()
+  const current = integrationAttempts.get(userId)
+  if (!current || now - current.startedAt >= 60_000) {
+    integrationAttempts.set(userId, { startedAt: now, count: 1 })
+    return
+  }
+  if (current.count >= 6) throw new Error('Too many connection attempts. Wait a minute and try again.')
+  current.count += 1
+}
 
 function fileDto(file: Awaited<ReturnType<typeof projects.getFile>> extends infer Result ? NonNullable<Result> : never) {
   return { id: file.id, path: file.path, content: file.content, encoding: file.encoding as 'utf-8' | 'utf-16le', version: file.updatedAt.getTime() }
@@ -97,6 +130,33 @@ export async function saveAiProviderAction(input: unknown): Promise<{ ok: true; 
 export async function clearAiProviderAction(): Promise<AiProviderStatus> {
   ;(await cookies()).delete(AI_PROVIDER_COOKIE)
   return aiProviderStatus(defaultAiProviderConfig())
+}
+
+export async function getIntegrationStatusesAction(): Promise<IntegrationConnectionStatus[]> {
+  if (!usePostgres) return []
+  return listIntegrationStatuses(await getIntegrationUserId())
+}
+
+export async function connectIntegrationAction(input: unknown): Promise<{ ok: true; status: IntegrationConnectionStatus } | { ok: false; error: string }> {
+  if (!usePostgres) return { ok: false, error: 'Persistent integration storage is not configured.' }
+  try {
+    const userId = await getIntegrationUserId()
+    claimIntegrationAttempt(userId)
+    const status = await saveIntegrationConnection(userId, input)
+    refreshProjectViews()
+    return { ok: true, status }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+    if (/rejected|service-account|private key|valid response|validation failed|credential|too many connection attempts/i.test(message)) return { ok: false, error: message }
+    return { ok: false, error: 'The connection could not be verified. Check the credential and try again.' }
+  }
+}
+
+export async function disconnectIntegrationAction(provider: IntegrationProvider): Promise<IntegrationConnectionStatus> {
+  if (!usePostgres) throw new Error('Persistent integration storage is not configured.')
+  const status = await disconnectIntegration(await getIntegrationUserId(), provider)
+  refreshProjectViews()
+  return status
 }
 
 export async function createBlankProjectAction(name?: string) {
