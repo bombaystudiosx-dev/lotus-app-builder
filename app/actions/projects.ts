@@ -16,6 +16,7 @@ import { cookies } from 'next/headers'
 import { AI_PROVIDER_COOKIE, aiProviderSchema, aiProviderStatus, decryptAiProviderConfig, defaultAiProviderConfig, encryptAiProviderConfig, generationModel, type AiProviderStatus } from '@/lib/ai-provider'
 import { createIntegrationSessionToken, disconnectIntegration, listIntegrationStatuses, parseIntegrationSessionToken, saveIntegrationConnection, type IntegrationConnectionStatus, type IntegrationProvider } from '@/lib/integration-connections'
 import { getMobileDeploymentConfig, saveMobileDeploymentConfig, type MobileDeploymentConfig } from '@/lib/mobile-deployment'
+import { createProjectInputSchema } from '@/lib/project-framework'
 
 const INTEGRATION_SESSION_COOKIE = 'lotus-integration-session'
 
@@ -184,8 +185,10 @@ export async function saveMobileDeploymentConfigAction(input: unknown): Promise<
   }
 }
 
-export async function createBlankProjectAction(name?: string) {
-  const created = await projects.createBlank(await getUserId(), name)
+export async function createBlankProjectAction(input?: unknown) {
+  const candidate = typeof input === 'string' ? { name: input } : input ?? {}
+  const parsed = createProjectInputSchema.parse(candidate)
+  const created = await projects.createBlank(await getUserId(), parsed.name, parsed.framework)
   refreshProjectViews(created.id)
   return created
 }
@@ -394,6 +397,7 @@ export interface RunBuildResult {
   html: string
   reply: string
   version: number
+  entryPath: string
 }
 
 export type RunBuildActionResult =
@@ -433,7 +437,8 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
   // editor save changes this exact file while generation is in flight.
   const runtime = await projects.getRuntime(userId, projectId)
   if (!runtime) throw new Error('Project runtime is unavailable.')
-  const entry = await projects.getFileByPath(userId, projectId, runtime.entryPath)
+  const generationEntry = runtime.runtime === 'react' ? runtime.metadata?.generationEntry ?? 'src/App.jsx' : runtime.entryPath
+  const entry = await projects.getFileByPath(userId, projectId, generationEntry)
   if (!entry) throw new Error('Project entry file is unavailable.')
   const expectedUpdatedAt = entry.updatedAt
   const safeCurrentHtml = input.currentHtml ? redactSensitiveValues(entry.content) : null
@@ -451,16 +456,20 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
   })
 
   // Build the prompt for the model, giving it the current app as context.
+  const componentMode = runtime.runtime === 'react'
+  const frameworkInstruction = componentMode
+    ? `Return only the complete React JSX module for ${generationEntry}. Use React and browser APIs only; do not import framework-specific server modules. The project framework is ${runtime.framework}, rendered through Lotus's React preview adapter.`
+    : 'Return only a complete self-contained HTML document.'
   const userContent = safeCurrentHtml
-    ? `Here is the current app HTML:\n\n${safeCurrentHtml}\n\n---\n\nApply this change and return the full updated HTML document:\n${safePrompt}${safeContextBlock}${specificationBlock}`
-    : `Build this app and return a complete HTML document:\n${safePrompt}${safeContextBlock}${specificationBlock}`
+    ? `Here is the current ${componentMode ? 'React component' : 'HTML document'}:\n\n${safeCurrentHtml}\n\n---\n\nApply this change. ${frameworkInstruction}\n${safePrompt}${safeContextBlock}${specificationBlock}`
+    : `Build this app. ${frameworkInstruction}\n${safePrompt}${safeContextBlock}${specificationBlock}`
 
   let html = entry.content
   try {
     const providerConfig = decryptAiProviderConfig((await cookies()).get(AI_PROVIDER_COOKIE)?.value)
     const { text } = await generateText({
       model: generationModel(providerConfig, resolveModel(model)),
-      system: SYSTEM_PROMPT,
+      system: componentMode ? 'You are Lotus, an expert React application builder. Generate one complete, accessible React component module for a secure browser preview. Return code only.' : SYSTEM_PROMPT,
       prompt: userContent,
       maxOutputTokens: 8000,
     })
@@ -492,7 +501,7 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
     content: reply,
   })
 
-  return { projectId, name: projectName, html, reply, version: updatedEntry.updatedAt.getTime() }
+  return { projectId, name: projectName, html, reply, version: updatedEntry.updatedAt.getTime(), entryPath: generationEntry }
 }
 
 export async function runBuildAction(input: RunBuildInput): Promise<RunBuildActionResult> {
@@ -552,7 +561,7 @@ export async function buildProjectPreviewAction(projectId: string, revision = 0,
 function stripFences(text: string): string {
   let out = text.trim()
   // Remove ```html ... ``` or ``` ... ``` wrappers if the model added them.
-  const fence = /^```(?:html)?\s*([\s\S]*?)\s*```$/i
+  const fence = /^```(?:html|jsx|tsx|javascript|typescript)?\s*([\s\S]*?)\s*```$/i
   const m = out.match(fence)
   if (m) out = m[1].trim()
   // If there's leading prose before the doctype, cut to the doctype/html.

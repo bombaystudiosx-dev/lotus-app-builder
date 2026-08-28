@@ -553,13 +553,13 @@ export default function App({ initial }: LotusBuilderProps) {
       const res = result.data;
       setProjectId(res.projectId);
       setProjectName(res.name);
-      const nextFiles = builderFiles.map(file => file.path === entryPath ? { ...file, content: res.html, version: res.version } : file);
+      const nextFiles = builderFiles.map(file => file.path === res.entryPath ? { ...file, content: res.html, version: res.version } : file);
       setBuilderFiles(nextFiles);
-      const preview = initial.runtime === "static" ? assembleStaticPreview(nextFiles, entryPath) : { html: generatedHtml, diagnostics: previewDiagnostics };
-      if (initial.runtime === "static") {
-        setGeneratedHtml(preview.html);
-        setPreviewDiagnostics(preview.diagnostics);
-      }
+      const preview = initial.runtime === "static"
+        ? assembleStaticPreview(nextFiles, entryPath)
+        : await buildProjectPreviewAction(res.projectId, 0, previewSessionRef.current);
+      setGeneratedHtml(preview.html);
+      setPreviewDiagnostics(preview.diagnostics);
       setView("preview");
       setMessages(p=>[...p,{ id:(Date.now()+1).toString(), role:"assistant", content:res.reply, ts:new Date() }]);
       setHistory(h=>[...h.slice(0,historyIdx+1), { label:safeText, html:preview.html }]);

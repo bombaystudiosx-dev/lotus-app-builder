@@ -20,8 +20,9 @@ import { PreviewWorkbench } from '@/components/lotus/preview-workbench'
 import { useResolvedTheme } from '@/components/lotus/use-resolved-theme'
 import { IntegrationSettings } from '@/components/lotus/integration-settings'
 import { MobileDeploymentSettings } from '@/components/lotus/mobile-deployment-settings'
+import { PROJECT_FRAMEWORKS, type ProjectFramework } from '@/lib/project-framework'
 
-type DashboardProject = Pick<Project, 'id' | 'name' | 'status' | 'updatedAt'>
+type DashboardProject = Pick<Project, 'id' | 'name' | 'status' | 'updatedAt'> & { framework: string }
 type DashboardSettings = Pick<UserSettings, 'theme' | 'editorFontSize' | 'autosaveInterval' | 'defaultDevice'>
 type ProductSection = 'projects' | 'templates' | 'preview' | 'deploy' | 'settings'
 
@@ -44,6 +45,13 @@ function formatDate(value: Date) {
   return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))
 }
 
+function frameworkLabel(value: string) {
+  if (value === 'static') return 'Static HTML'
+  if (value === 'nextjs') return 'Next.js'
+  if (value === 'expo') return 'Expo'
+  return 'React'
+}
+
 function sectionHref(section: ProductSection) { return section === 'projects' ? '/' : `/?section=${section}` }
 
 export function ProductShell({ initialProjects, initialSettings, userName, initialSection = 'projects' }: {
@@ -57,6 +65,7 @@ export function ProductShell({ initialProjects, initialSettings, userName, initi
   const projects = initialProjects
   const [settings, setSettings] = useState(initialSettings)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
   const resolvedTheme = useResolvedTheme(settings.theme)
@@ -76,9 +85,10 @@ export function ProductShell({ initialProjects, initialSettings, userName, initi
     })
   }
 
-  function createProject() {
+  function createProject(input: { name: string; framework: ProjectFramework }) {
     run(async () => {
-      const created = await createBlankProjectAction()
+      const created = await createBlankProjectAction(input)
+      setNewProjectOpen(false)
       router.push(`/projects/${created.id}`)
       router.refresh()
     })
@@ -95,13 +105,27 @@ export function ProductShell({ initialProjects, initialSettings, userName, initi
       </header>
       <main className="px-4 py-6 sm:px-7 lg:px-10 lg:py-9">
         {error && <div role="alert" className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-        {section === 'projects' && <ProjectsWorkspace projects={projects} pending={pending} onCreate={createProject} onError={setError} onRefresh={() => router.refresh()} run={run}/>}
+        {section === 'projects' && <ProjectsWorkspace projects={projects} pending={pending} onCreate={() => setNewProjectOpen(true)} onError={setError} onRefresh={() => router.refresh()} run={run}/>}
         {section === 'templates' && <TemplatesWorkspace pending={pending} run={run} router={router}/>}
         {section === 'preview' && <DedicatedPreview projects={projects.filter(project => project.status === 'active')}/>}
         {section === 'deploy' && <DeployWorkspace projects={projects.filter(project => project.status === 'active')}/>}
         {section === 'settings' && <SettingsWorkspace projects={projects.filter(project => project.status === 'active')} settings={settings} setSettings={setSettings} pending={pending} run={run}/>}
       </main>
     </div>
+    {newProjectOpen && <NewProjectDialog pending={pending} onClose={() => setNewProjectOpen(false)} onCreate={createProject}/>}
+  </div>
+}
+
+function NewProjectDialog({ pending, onClose, onCreate }: { pending: boolean; onClose: () => void; onCreate: (input: { name: string; framework: ProjectFramework }) => void }) {
+  const [name, setName] = useState('Untitled project')
+  const [framework, setFramework] = useState<ProjectFramework>('static')
+  return <div role="presentation" className="fixed inset-0 z-[70] grid place-items-center bg-black/35 p-4" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
+    <section role="dialog" aria-modal="true" aria-labelledby="new-project-title" className="max-h-[90svh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[#eadfd8] bg-[#fffdfb] p-5 shadow-2xl dark:border-white/10 dark:bg-[#211b18] sm:p-6">
+      <div className="flex items-start justify-between gap-4"><div><h2 id="new-project-title" className="text-xl font-bold">Create a new project</h2><p className="mt-1 text-sm text-[#806b60] dark:text-[#bba99f]">Choose the framework Lotus should persist, preview, and generate for.</p></div><button type="button" onClick={onClose} aria-label="Close new project dialog" className="rounded-lg p-2 hover:bg-black/5 dark:hover:bg-white/10"><X size={18}/></button></div>
+      <label className="mt-5 grid gap-1.5 text-sm font-medium">Project name<input autoFocus className="input" value={name} maxLength={100} onChange={event => setName(event.target.value)}/></label>
+      <fieldset className="mt-5"><legend className="text-sm font-semibold">Framework</legend><div className="mt-2 grid gap-2 sm:grid-cols-2">{PROJECT_FRAMEWORKS.map(item => <label key={item.id} className={`cursor-pointer rounded-xl border p-4 transition ${framework === item.id ? 'border-[#e98b66] bg-[#fff3eb] dark:bg-white/10' : 'border-[#eadfd8] hover:border-[#d9b8a6] dark:border-white/10'}`}><input type="radio" name="framework" value={item.id} checked={framework === item.id} onChange={() => setFramework(item.id)} className="sr-only"/><span className="flex items-center justify-between gap-2"><span className="font-semibold">{item.label}</span><span className="text-[10px] font-semibold uppercase tracking-wide text-[#b46743]">{item.platforms}</span></span><span className="mt-1 block text-xs leading-5 text-[#806b60] dark:text-[#bba99f]">{item.description}</span></label>)}</div></fieldset>
+      <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={onClose} className="rounded-xl border border-[#eadfd8] px-4 py-2 text-sm dark:border-white/10">Cancel</button><button type="button" disabled={pending || !name.trim()} onClick={() => onCreate({ name, framework })} className="rounded-xl bg-[#e98b66] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{pending ? 'Creating…' : `Create ${PROJECT_FRAMEWORKS.find(item => item.id === framework)?.label} project`}</button></div>
+    </section>
   </div>
 }
 
@@ -151,7 +175,7 @@ function ProjectCard({ item, compact, pending, onRefresh, run }: { item: Dashboa
   const mutate = (action: () => Promise<unknown>) => run(async () => { await action(); setMenu(false); onRefresh() })
   return <article className={`relative border border-[#eadfd8] bg-white dark:border-white/10 dark:bg-white/5 ${compact ? 'flex items-center gap-4 rounded-xl p-3' : 'rounded-2xl p-4'}`}>
     <div className={`${compact ? 'h-14 w-20' : 'h-36 w-full'} flex shrink-0 items-center justify-center rounded-xl bg-[radial-gradient(circle_at_60%_20%,#fff,transparent_32%),linear-gradient(135deg,#f8e4d7,#fff8f2)] text-[#b87850]`}><Monitor size={compact ? 22 : 30}/></div>
-    <div className={`${compact ? 'min-w-0 flex-1' : 'mt-4'}`}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-semibold">{item.name}</p><p className="mt-1 text-xs text-[#806b60] dark:text-[#bba99f]">Static HTML · Updated {formatDate(item.updatedAt)}</p></div><button type="button" onClick={() => setMenu(value => !value)} aria-label={`Project actions for ${item.name}`} className="rounded-lg p-1.5 hover:bg-[#fff4ed] dark:hover:bg-white/10"><MoreHorizontal size={17}/></button></div><div className="mt-3 flex flex-wrap items-center gap-2"><StatusBadge label={status} tone={item.status === 'active' ? 'neutral' : 'warning'}/><span className="text-xs text-[#806b60] dark:text-[#bba99f]">Development</span>{item.status !== 'trashed' && <Link href={`/projects/${item.id}`} className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-[#b46743]">Open <ChevronRight size={14}/></Link>}</div></div>
+    <div className={`${compact ? 'min-w-0 flex-1' : 'mt-4'}`}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-semibold">{item.name}</p><p className="mt-1 text-xs text-[#806b60] dark:text-[#bba99f]">{frameworkLabel(item.framework)} · Updated {formatDate(item.updatedAt)}</p></div><button type="button" onClick={() => setMenu(value => !value)} aria-label={`Project actions for ${item.name}`} className="rounded-lg p-1.5 hover:bg-[#fff4ed] dark:hover:bg-white/10"><MoreHorizontal size={17}/></button></div><div className="mt-3 flex flex-wrap items-center gap-2"><StatusBadge label={status} tone={item.status === 'active' ? 'neutral' : 'warning'}/><span className="text-xs text-[#806b60] dark:text-[#bba99f]">Development</span>{item.status !== 'trashed' && <Link href={`/projects/${item.id}`} className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-[#b46743]">Open <ChevronRight size={14}/></Link>}</div></div>
     {menu && <div className="absolute right-3 top-12 z-20 w-44 rounded-xl border border-[#eadfd8] bg-white p-1.5 text-sm shadow-lg dark:border-white/10 dark:bg-[#27201c]">{item.status !== 'trashed' && <Link href={`/projects/${item.id}`} className="block rounded-lg px-3 py-2 hover:bg-[#fff4ed] dark:hover:bg-white/10">Open project</Link>}{item.status === 'active' && <><button type="button" onClick={() => { const name=window.prompt('Project name',item.name); if(name) mutate(() => renameProjectAction(item.id,name)) }} className="block w-full rounded-lg px-3 py-2 text-left hover:bg-[#fff4ed] dark:hover:bg-white/10">Rename</button><button type="button" onClick={() => mutate(() => duplicateProjectAction(item.id))} className="block w-full rounded-lg px-3 py-2 text-left hover:bg-[#fff4ed] dark:hover:bg-white/10">Duplicate</button><button type="button" onClick={() => mutate(() => archiveProjectAction(item.id))} className="block w-full rounded-lg px-3 py-2 text-left hover:bg-[#fff4ed] dark:hover:bg-white/10">Archive</button></>}{item.status !== 'active' && <button type="button" onClick={() => mutate(() => restoreProjectAction(item.id))} className="block w-full rounded-lg px-3 py-2 text-left hover:bg-[#fff4ed] dark:hover:bg-white/10">Restore</button>}{item.status !== 'trashed' && <button type="button" onClick={() => mutate(() => softDeleteProjectAction(item.id))} className="block w-full rounded-lg px-3 py-2 text-left text-red-600 hover:bg-red-50">Move to trash</button>}{item.status === 'trashed' && <button type="button" disabled={pending} onClick={() => { if(window.confirm(`Permanently delete ${item.name}?`)) mutate(() => permanentlyDeleteProjectAction(item.id)) }} className="block w-full rounded-lg px-3 py-2 text-left text-red-600 hover:bg-red-50">Delete forever</button>}</div>}
   </article>
 }
@@ -184,7 +208,7 @@ function SettingsWorkspace({ projects, settings, setSettings, pending, run }: { 
   const current=projects.find(project=>project.id===projectId)
   function preference(input:Partial<DashboardSettings>){run(async()=>setSettings(await updateSettingsAction(input)))}
   return <><WorkspaceHeader title="Settings" subtitle="Manage workspace preferences, integrations, and project safety." actions={<select aria-label="Settings project" value={projectId} onChange={event=>setProjectId(event.target.value)} className="h-10 rounded-xl border border-[#eadfd8] bg-white px-3 text-sm dark:border-white/10 dark:bg-[#211b18]"><option value="">Workspace settings</option>{projects.map(project=><option key={project.id} value={project.id}>{project.name}</option>)}</select>}/><div className="mt-7 grid gap-6 lg:grid-cols-[190px_minmax(0,760px)]"><nav className="flex gap-1 overflow-x-auto lg:grid lg:self-start">{['General','Appearance','Environment','Integrations','Deployment','Danger Zone'].map(item=><button key={item} type="button" onClick={()=>setTab(item)} aria-pressed={tab===item} className="whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm aria-pressed:bg-[#fff0e5] aria-pressed:font-semibold dark:aria-pressed:bg-white/10">{item}</button>)}</nav><div>
-    {tab==='General'&&<Panel title="General"><div className="grid gap-4"><Field label="Project name"><input value={current?.name??''} disabled={!current||pending} onChange={()=>{}} readOnly className="input"/></Field><p className="text-xs text-[#806b60]">Rename the selected project from its Projects action menu. Framework and runtime are derived from the persisted project configuration.</p><InfoRow label="Framework" value={current?'Static HTML':'No project selected'}/><InfoRow label="Default environment" value="Development"/></div></Panel>}
+    {tab==='General'&&<Panel title="General"><div className="grid gap-4"><Field label="Project name"><input value={current?.name??''} disabled={!current||pending} onChange={()=>{}} readOnly className="input"/></Field><p className="text-xs text-[#806b60]">Rename the selected project from its Projects action menu. Framework and runtime are derived from the persisted project configuration.</p><InfoRow label="Framework" value={current ? frameworkLabel(current.framework) : 'No project selected'}/><InfoRow label="Default environment" value="Development"/></div></Panel>}
     {tab==='Appearance'&&<Panel title="Appearance"><div className="grid gap-4 sm:grid-cols-2"><SelectField label="Theme" value={settings.theme} disabled={pending} onChange={value=>preference({theme:value as DashboardSettings['theme']})} options={['system','light','dark']}/><SelectField label="Default preview" value={settings.defaultDevice} disabled={pending} onChange={value=>preference({defaultDevice:value as DashboardSettings['defaultDevice']})} options={['phone','tablet','desktop']}/><SelectField label="Editor font size" value={String(settings.editorFontSize)} disabled={pending} onChange={value=>preference({editorFontSize:Number(value)})} options={['12','14','16','18','20','24']}/><SelectField label="Autosave interval" value={String(settings.autosaveInterval)} disabled={pending} onChange={value=>preference({autosaveInterval:Number(value)})} options={['5','15','30','60','300']}/></div></Panel>}
     {tab==='Environment'&&<Panel title="Environment variables"><div className="rounded-xl border border-dashed border-[#d9c7bc] p-6 text-center dark:border-white/15"><KeyRound className="mx-auto text-[#b87850]" size={22}/><p className="mt-3 text-sm font-semibold">Secure environment storage is not connected</p><p className="mx-auto mt-2 max-w-md text-xs leading-5 text-[#806b60]">Values are never placed in frontend source. Connect a deployment provider with encrypted secret storage before adding production variables.</p><button type="button" disabled className="mt-4 rounded-xl border px-3 py-2 text-sm opacity-50">Add variable</button></div></Panel>}
     {tab==='Integrations'&&<Panel title="Integrations"><IntegrationSettings/><div className="mt-5 rounded-xl border border-[#eadfd8] p-4 dark:border-white/10"><div className="flex items-center justify-between gap-3"><div><p className="font-semibold">AI provider</p><p className="text-xs text-[#806b60]">{aiStatus?.configured?`Connected securely: ${aiStatus.provider}${aiStatus.keyHint?` ${aiStatus.keyHint}`:''}`:'Vercel Gateway is the current default.'}</p></div>{aiStatus?.configured&&<StatusBadge label="Connected" tone="success"/>}</div><div className="mt-4 grid gap-3 sm:grid-cols-2"><SelectField label="Provider" value={provider} disabled={pending} onChange={value=>setProvider(value as AiProviderStatus['provider'])} options={['vercel','openai','anthropic','google','openrouter','custom']}/><Field label="Model"><input value={model} onChange={event=>setModel(event.target.value)} className="input"/></Field>{provider==='custom'&&<Field label="API base URL"><input value={baseURL} onChange={event=>setBaseURL(event.target.value)} className="input"/></Field>}{provider!=='vercel'&&<Field label="API key"><div className="flex gap-2"><input type={revealed?'text':'password'} value={apiKey} onChange={event=>setApiKey(event.target.value)} autoComplete="off" className="input flex-1" placeholder={aiStatus?.keyHint?`Saved ${aiStatus.keyHint}`:'Provider key'}/><button type="button" onClick={()=>setRevealed(value=>!value)} className="rounded-lg border px-3 text-xs">{revealed?'Hide':'Reveal'}</button></div></Field>}</div><div className="mt-4 flex gap-2"><button type="button" onClick={()=>run(async()=>{const result=await saveAiProviderAction({provider,model,baseURL,apiKey});if(!result.ok)throw new Error(result.error);setAiStatus(result.status);setApiKey('')})} disabled={pending} className="rounded-xl bg-[#e98b66] px-4 py-2 text-sm font-semibold text-white">Save provider</button>{aiStatus?.configured&&<button type="button" onClick={()=>run(async()=>setAiStatus(await clearAiProviderAction()))} className="rounded-xl border px-4 py-2 text-sm">Disconnect</button>}</div></div></Panel>}

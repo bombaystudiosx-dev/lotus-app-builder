@@ -3,16 +3,11 @@ import type { Project, ProjectFile, ProjectRuntime, UserSettings } from '@/lib/d
 import { postgresTransaction, row, rows, type PostgresExecutor } from '@/lib/db/postgres'
 import { createProjectSpecification, parseProjectSpecification, type ProjectSpecification } from '@/lib/project-specification'
 import { ProjectLifecycleError, type FileEncoding, type ProjectFileInput, type ProjectFileUpdate } from '@/lib/projects'
+import { frameworkProjectSetup, type ProjectFramework } from '@/lib/project-framework'
 
 const MAX_FILE_BYTES = 1_048_576
 const MAX_PROJECT_BYTES = 5_242_880
 const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i
-const STARTER_FILES: ProjectFileInput[] = [
-  { path: 'index.html', content: '<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="utf-8">\n    <meta name="viewport" content="width=device-width, initial-scale=1">\n    <title>Lotus app</title>\n    <link rel="stylesheet" href="styles.css">\n  </head>\n  <body>\n    <main><h1>Start building</h1></main>\n    <script src="script.js"></script>\n  </body>\n</html>\n' },
-  { path: 'styles.css', content: ':root { font-family: system-ui, sans-serif; }\nbody { margin: 0; padding: 2rem; }\n' },
-  { path: 'script.js', content: 'console.info("Lotus starter ready")\n' },
-]
-
 const DEFAULT_SETTINGS = { theme: 'system', editorFontSize: 14, autosaveInterval: 30, defaultDevice: 'phone' } as const
 
 type SettingsInput = Partial<Pick<UserSettings, 'theme' | 'editorFontSize' | 'autosaveInterval' | 'defaultDevice'>>
@@ -102,7 +97,7 @@ export function createPostgresProjectService(pool: Pool) {
 
   return {
     async list(userId: string) { return rows<Project>(pool, 'SELECT * FROM project WHERE "userId" = $1 ORDER BY "updatedAt" DESC', [userId]) },
-    async listDashboard(userId: string) { return rows<Pick<Project, 'id' | 'name' | 'status' | 'updatedAt'>>(pool, 'SELECT id, name, status, "updatedAt" FROM project WHERE "userId" = $1 ORDER BY "updatedAt" DESC LIMIT 100', [userId]) },
+    async listDashboard(userId: string) { return rows<Pick<Project, 'id' | 'name' | 'status' | 'updatedAt'> & { framework: string }>(pool, `SELECT p.id, p.name, p.status, p."updatedAt", COALESCE(r.framework, 'static') AS framework FROM project p LEFT JOIN project_runtime r ON r."projectId" = p.id WHERE p."userId" = $1 ORDER BY p."updatedAt" DESC LIMIT 100`, [userId]) },
     async get(userId: string, projectId: string) { return (await row<Project>(pool, 'SELECT * FROM project WHERE id = $1 AND "userId" = $2 LIMIT 1', [projectId, userId])) ?? null },
     async getSpecification(userId: string, projectId: string) {
       await owned(pool, userId, projectId)
@@ -120,17 +115,18 @@ export function createPostgresProjectService(pool: Pool) {
       })
       return specification
     },
-    async createBlank(userId: string, name = 'Untitled project') {
+    async createBlank(userId: string, name = 'Untitled project', framework: ProjectFramework = 'static') {
       const projectId = id()
       const projectName = normalizedName(name)
+      const setup = frameworkProjectSetup(framework)
       await postgresTransaction(async client => {
         await client.query('INSERT INTO project (id, "userId", name) VALUES ($1, $2, $3)', [projectId, userId, projectName])
-        await client.query('INSERT INTO project_runtime ("projectId") VALUES ($1)', [projectId])
-        for (const starter of STARTER_FILES) {
+        await client.query('INSERT INTO project_runtime ("projectId", runtime, framework, "buildTool", "entryPath", metadata) VALUES ($1, $2, $3, $4, $5, $6)', [projectId, setup.runtime, setup.framework, setup.buildTool, setup.entryPath, setup.metadata])
+        for (const starter of setup.files) {
           const file = validateFileInput(starter)
           await client.query('INSERT INTO project_file (id, "projectId", path, content, encoding, size) VALUES ($1, $2, $3, $4, $5, $6)', [id(), projectId, file.path, file.content, file.encoding, file.bytes])
         }
-        await client.query('INSERT INTO project_specification ("projectId", specification) VALUES ($1, $2)', [projectId, createProjectSpecification({ name: projectName, prompt: `Build ${projectName}`, targets: ['web'] })])
+        await client.query('INSERT INTO project_specification ("projectId", specification) VALUES ($1, $2)', [projectId, createProjectSpecification({ name: projectName, prompt: `Build ${projectName}`, targets: [...setup.targets] })])
       })
       return owned(pool, userId, projectId)
     },

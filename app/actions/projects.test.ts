@@ -166,6 +166,20 @@ describe('runtime entry build persistence', () => {
     expect(mocks.updateFile).toHaveBeenCalledTimes(1)
     expect(mocks.insert).toHaveBeenCalledTimes(1)
   })
+
+  it('generates into the component entry for React-compatible frameworks', async () => {
+    const component = { ...entry, id: 'component-1', path: 'src/App.jsx', content: 'export default function App(){ return <main>Old</main> }' }
+    mocks.getRuntime.mockResolvedValue({ runtime: 'react', framework: 'nextjs', entryPath: 'index.html', metadata: { generationEntry: 'src/App.jsx', previewAdapter: 'react' } })
+    mocks.getFileByPath.mockResolvedValue(component)
+    mocks.generateText.mockResolvedValue({ text: '```jsx\nexport default function App(){ return <main>New</main> }\n```' })
+    mocks.updateFile.mockResolvedValue({ ...component, updatedAt: new Date(300) })
+
+    const result = await runBuild({ projectId: 'project-1', prompt: 'Update it', model: 'Enigma Auto', currentHtml: '<html>ignored</html>' })
+    expect(mocks.getFileByPath).toHaveBeenCalledWith('user-a', 'project-1', 'src/App.jsx')
+    expect(mocks.generateText).toHaveBeenCalledWith(expect.objectContaining({ prompt: expect.stringContaining('project framework is nextjs') }))
+    expect(mocks.updateFile).toHaveBeenCalledWith('user-a', 'project-1', 'component-1', expect.objectContaining({ content: 'export default function App(){ return <main>New</main> }' }))
+    expect(result.entryPath).toBe('src/App.jsx')
+  })
 })
 
 describe('authenticated project and file actions', () => {
@@ -209,12 +223,19 @@ describe('authenticated project and file actions', () => {
     await expect(trashProjectFileAction('project-1', 'file-1')).resolves.toMatchObject({ id: 'file-1' })
     await expect(restoreProjectFileAction('project-1', 'file-1')).resolves.toMatchObject({ id: 'file-1' })
 
-    expect(mocks.createBlank).toHaveBeenCalledWith('user-a', undefined)
+    expect(mocks.createBlank).toHaveBeenCalledWith('user-a', 'Untitled project', 'static')
     expect(mocks.createFile).toHaveBeenCalledWith('user-a', 'project-1', { path: 'index.html', content: '' })
     expect(mocks.updateFile).toHaveBeenCalledWith('user-a', 'project-1', 'file-1', { content: 'updated', expectedUpdatedAt: new Date(100) })
     expect(mocks.updateFile).toHaveBeenCalledWith('user-a', 'project-1', 'file-1', { content: 'updated', expectedUpdatedAt: undefined })
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/')
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/projects/project-1')
+  })
+
+  it('persists a validated framework choice when creating a project', async () => {
+    mocks.createBlank.mockResolvedValue({ id: 'react-project' })
+    await expect(createBlankProjectAction({ name: 'Customer portal', framework: 'react' })).resolves.toEqual({ id: 'react-project' })
+    expect(mocks.createBlank).toHaveBeenCalledWith('user-a', 'Customer portal', 'react')
+    await expect(createBlankProjectAction({ name: 'Bad', framework: 'wordpress' })).rejects.toThrow()
   })
 
   it('falls back to index.html when a renamed project has no runtime record', async () => {

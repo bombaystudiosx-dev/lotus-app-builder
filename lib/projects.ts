@@ -1,9 +1,10 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type Database from 'better-sqlite3'
 import type * as schema from '@/lib/db/schema'
-import { project, userSettings, type Project, type ProjectFile, type ProjectRuntime, type UserSettings } from '@/lib/db/schema'
+import { project, projectRuntime, userSettings, type Project, type ProjectFile, type ProjectRuntime, type UserSettings } from '@/lib/db/schema'
 import { createProjectSpecification, parseProjectSpecification, type ProjectSpecification } from '@/lib/project-specification'
+import { frameworkProjectSetup, type ProjectFramework } from '@/lib/project-framework'
 
 export type ProjectStatus = 'active' | 'archived' | 'trashed'
 export type Theme = 'system' | 'light' | 'dark'
@@ -21,12 +22,6 @@ const MAX_FILE_BYTES = 1_048_576
 const MAX_PROJECT_BYTES = 5_242_880
 const SUPPORTED_ENCODINGS = new Set<FileEncoding>(['utf-8', 'utf-16le'])
 const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i
-const STARTER_FILES: ProjectFileInput[] = [
-  { path: 'index.html', content: '<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="utf-8">\n    <meta name="viewport" content="width=device-width, initial-scale=1">\n    <title>Lotus app</title>\n    <link rel="stylesheet" href="styles.css">\n  </head>\n  <body>\n    <main><h1>Start building</h1></main>\n    <script src="script.js"></script>\n  </body>\n</html>\n' },
-  { path: 'styles.css', content: ':root { font-family: system-ui, sans-serif; }\nbody { margin: 0; padding: 2rem; }\n' },
-  { path: 'script.js', content: 'console.info("Lotus starter ready")\n' },
-]
-
 const DEFAULT_SETTINGS = {
   theme: 'system' as Theme,
   editorFontSize: 14,
@@ -73,7 +68,16 @@ function fileFromRow(row: RawFile): ProjectFile {
 }
 
 function runtimeFromRow(row: RawRuntime): ProjectRuntime {
-  return { ...row, createdAt: new Date(row.createdAt), updatedAt: new Date(row.updatedAt) }
+  let metadata: Record<string, string> = {}
+  if (typeof row.metadata === 'string') {
+    try {
+      const parsed = JSON.parse(row.metadata) as unknown
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) metadata = Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+    } catch { throw new ProjectLifecycleError('Project runtime metadata is corrupted.') }
+  } else if (row.metadata && typeof row.metadata === 'object') {
+    metadata = row.metadata
+  }
+  return { ...row, metadata, createdAt: new Date(row.createdAt), updatedAt: new Date(row.updatedAt) }
 }
 
 function settingsValues(input: unknown): SettingsInput {
@@ -177,8 +181,8 @@ export function createProjectService(database: ProjectDatabase) {
       return database.select().from(project).where(eq(project.userId, userId)).orderBy(desc(project.updatedAt))
     },
     async listDashboard(userId: string) {
-      return database.select({ id: project.id, name: project.name, status: project.status, updatedAt: project.updatedAt })
-        .from(project).where(eq(project.userId, userId)).orderBy(desc(project.updatedAt)).limit(100)
+      return database.select({ id: project.id, name: project.name, status: project.status, updatedAt: project.updatedAt, framework: sql<string>`coalesce(${projectRuntime.framework}, 'static')` })
+        .from(project).leftJoin(projectRuntime, eq(projectRuntime.projectId, project.id)).where(eq(project.userId, userId)).orderBy(desc(project.updatedAt)).limit(100)
     },
     async get(userId: string, projectId: string) {
       const [row] = await database.select().from(project)
@@ -207,27 +211,28 @@ export function createProjectService(database: ProjectDatabase) {
       touchProject(projectId, now)
       return specification
     },
-    async createBlank(userId: string, name = 'Untitled project') {
+    async createBlank(userId: string, name = 'Untitled project', framework: ProjectFramework = 'static') {
       const now = new Date()
       const projectName = normalizedName(name)
+      const setup = frameworkProjectSetup(framework)
       const created: typeof project.$inferInsert = {
         id: newId(), userId, name: projectName, mode: 'html', files: {}, status: 'active', createdAt: now, updatedAt: now,
       }
       withTransaction(() => {
         database.insert(project).values(created).run()
         sqlite.prepare(`INSERT INTO project_runtime (projectId, runtime, framework, buildTool, entryPath, metadata, createdAt, updatedAt)
-          VALUES (?, 'static', 'static', NULL, 'index.html', '{}', ?, ?)`)
-          .run(created.id, now.getTime(), now.getTime())
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(created.id, setup.runtime, setup.framework, setup.buildTool, setup.entryPath, JSON.stringify(setup.metadata), now.getTime(), now.getTime())
         const insert = sqlite.prepare(`INSERT INTO project_file (id, projectId, path, content, encoding, size, originalPath, deletedAt, createdAt, updatedAt)
           VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`)
-        for (const starter of STARTER_FILES) {
+        for (const starter of setup.files) {
           const file = validateFileInput(starter)
           insert.run(newId(), created.id, file.path, file.content, file.encoding, file.bytes, now.getTime(), now.getTime())
         }
         const specification = createProjectSpecification({
           name: projectName,
           prompt: `Build ${projectName}`,
-          targets: ['web'],
+          targets: [...setup.targets],
         })
         sqlite.prepare(`INSERT INTO project_specification (projectId, specification, createdAt, updatedAt)
           VALUES (?, ?, ?, ?)`)

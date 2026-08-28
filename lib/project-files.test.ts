@@ -47,6 +47,17 @@ describe('normalized project files', () => {
     await expect(projects.getFile('user-a', created.id, nested.id)).resolves.toMatchObject({ path: 'src/components/greeting.js', content: 'export const greeting = "hi"' })
   })
 
+  it('seeds component projects with framework metadata and platform targets', async () => {
+    const projects = setup()
+    const react = await projects.createBlank('user-a', 'React app', 'react')
+    expect(await projects.getRuntime('user-a', react.id)).toMatchObject({ runtime: 'react', framework: 'react', entryPath: 'index.html', metadata: { generationEntry: 'src/App.jsx', previewAdapter: 'react' } })
+    expect((await projects.listFiles('user-a', react.id)).map(file => file.path)).toEqual(expect.arrayContaining(['index.html', 'src/main.jsx', 'src/App.jsx', 'src/styles.css']))
+
+    const expo = await projects.createBlank('user-a', 'Mobile app', 'expo')
+    expect(await projects.getRuntime('user-a', expo.id)).toMatchObject({ runtime: 'react', framework: 'expo', buildTool: 'expo' })
+    expect((await projects.getSpecification('user-a', expo.id)).targets.map(target => target.platform)).toEqual(['ios', 'android'])
+  })
+
   it('moves, duplicates, updates, trashes, restores and permanently deletes a file', async () => {
     const projects = setup()
     const created = await projects.createBlank('user-a')
