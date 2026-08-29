@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import { createProjectSpecification } from '@/lib/project-specification'
 
-const SCHEMA_VERSION = 5
+const SCHEMA_VERSION = 6
 
 const CREATE_BASE_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS user (
@@ -24,6 +24,10 @@ const CREATE_BASE_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS verification (
     id TEXT PRIMARY KEY, identifier TEXT NOT NULL, value TEXT NOT NULL,
     expiresAt INTEGER NOT NULL, createdAt INTEGER, updatedAt INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS rateLimit (
+    id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, count INTEGER NOT NULL,
+    lastRequest INTEGER NOT NULL
   );
   CREATE TABLE IF NOT EXISTS project (
     id TEXT PRIMARY KEY, userId TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
@@ -74,6 +78,7 @@ const CREATE_INDEXES_SQL = `
   CREATE INDEX IF NOT EXISTS account_user_id_idx ON account(userId);
   CREATE INDEX IF NOT EXISTS session_user_id_idx ON session(userId);
   CREATE INDEX IF NOT EXISTS verification_identifier_idx ON verification(identifier);
+  CREATE UNIQUE INDEX IF NOT EXISTS rate_limit_key_idx ON rateLimit(key);
   CREATE INDEX IF NOT EXISTS project_user_updated_at_idx ON project(userId, updatedAt);
   CREATE INDEX IF NOT EXISTS project_user_status_updated_at_idx ON project(userId, status, updatedAt);
   CREATE INDEX IF NOT EXISTS project_file_project_updated_at_idx ON project_file(projectId, updatedAt);

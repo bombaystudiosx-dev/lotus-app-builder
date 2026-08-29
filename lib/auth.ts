@@ -14,6 +14,18 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     autoSignIn: true,
+    minPasswordLength: 8,
+    maxPasswordLength: 128,
+  },
+  rateLimit: {
+    enabled: true,
+    window: 60,
+    max: 60,
+    storage: 'database',
+    customRules: {
+      '/sign-in/email': { window: 60, max: 5 },
+      '/sign-up/email': { window: 60, max: 5 },
+    },
   },
   trustedOrigins: [
     // v0 preview surfaces are served from dynamic sandbox hosts, so trust the

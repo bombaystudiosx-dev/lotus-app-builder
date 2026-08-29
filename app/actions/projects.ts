@@ -1,6 +1,6 @@
 'use server'
 
-import { db, sqlite } from '@/lib/db'
+import { db } from '@/lib/db'
 import { message } from '@/lib/db/schema'
 import { and, asc, eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
@@ -11,44 +11,23 @@ import { createPostgresProjectService } from '@/lib/postgres-projects'
 import { postgresPool, rows } from '@/lib/db/postgres'
 import { assembleStaticPreview, type PreviewBuild } from '@/lib/preview-runtime'
 import type { ProjectSpecification } from '@/lib/project-specification'
-import { ensureGuestWorkspace } from '@/lib/guest-workspace'
 import { cookies } from 'next/headers'
 import { AI_PROVIDER_COOKIE, aiProviderSchema, aiProviderStatus, decryptAiProviderConfig, defaultAiProviderConfig, encryptAiProviderConfig, generationModel, type AiProviderStatus } from '@/lib/ai-provider'
-import { createIntegrationSessionToken, disconnectIntegration, listIntegrationStatuses, parseIntegrationSessionToken, saveIntegrationConnection, type IntegrationConnectionStatus, type IntegrationProvider } from '@/lib/integration-connections'
+import { disconnectIntegration, listIntegrationStatuses, saveIntegrationConnection, type IntegrationConnectionStatus, type IntegrationProvider } from '@/lib/integration-connections'
 import { getMobileDeploymentConfig, saveMobileDeploymentConfig, type MobileDeploymentConfig } from '@/lib/mobile-deployment'
 import { createProjectInputSchema } from '@/lib/project-framework'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { getStarterTemplate } from '@/lib/template-catalog'
 import { renderStarterTemplate } from '@/lib/template-html'
-
-const INTEGRATION_SESSION_COOKIE = 'lotus-integration-session'
+import { requireCurrentUser } from '@/lib/auth-session'
 
 async function getUserId() {
-  if (usePostgres) {
-    await postgresPool.query(`INSERT INTO "user" (id, name, email, "emailVerified") VALUES ($1, $2, $3, true)
-      ON CONFLICT (id) DO NOTHING`, ['lotus-public-guest', 'Lotus Guest', 'guest@lotus.local'])
-    return 'lotus-public-guest'
-  }
-  return ensureGuestWorkspace(sqlite)
+  return (await requireCurrentUser()).id
 }
 
 async function getIntegrationUserId() {
-  const cookieStore = await cookies()
-  let userId = parseIntegrationSessionToken(cookieStore.get(INTEGRATION_SESSION_COOKIE)?.value)
-  if (!userId) {
-    userId = crypto.randomUUID()
-    cookieStore.set(INTEGRATION_SESSION_COOKIE, createIntegrationSessionToken(userId), {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 365,
-    })
-  }
-  await postgresPool.query(`INSERT INTO "user" (id, name, email, "emailVerified") VALUES ($1, $2, $3, true)
-    ON CONFLICT (id) DO NOTHING`, [userId, 'Lotus Integration Owner', `${userId}@integration.lotus.local`])
-  return userId
+  return getUserId()
 }
 
 function id() {
@@ -107,18 +86,20 @@ export async function getUserSettings() {
 }
 
 export async function getAiProviderStatusAction(): Promise<AiProviderStatus> {
-  return aiProviderStatus(decryptAiProviderConfig((await cookies()).get(AI_PROVIDER_COOKIE)?.value))
+  const userId = await getUserId()
+  return aiProviderStatus(decryptAiProviderConfig((await cookies()).get(AI_PROVIDER_COOKIE)?.value, userId))
 }
 
 export async function saveAiProviderAction(input: unknown): Promise<{ ok: true; status: AiProviderStatus } | { ok: false; error: string }> {
+  const userId = await getUserId()
   try {
-    const existing = decryptAiProviderConfig((await cookies()).get(AI_PROVIDER_COOKIE)?.value)
+    const existing = decryptAiProviderConfig((await cookies()).get(AI_PROVIDER_COOKIE)?.value, userId)
     const candidate = input && typeof input === 'object' ? input as Record<string, unknown> : {}
     const config = aiProviderSchema.parse({
       ...candidate,
       apiKey: candidate.apiKey || (candidate.provider === existing.provider ? existing.apiKey : ''),
     })
-    ;(await cookies()).set(AI_PROVIDER_COOKIE, encryptAiProviderConfig(config), {
+    ;(await cookies()).set(AI_PROVIDER_COOKIE, encryptAiProviderConfig(config, userId), {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
@@ -134,6 +115,7 @@ export async function saveAiProviderAction(input: unknown): Promise<{ ok: true; 
 }
 
 export async function clearAiProviderAction(): Promise<AiProviderStatus> {
+  await getUserId()
   ;(await cookies()).delete(AI_PROVIDER_COOKIE)
   return aiProviderStatus(defaultAiProviderConfig())
 }
@@ -465,7 +447,7 @@ export async function runBuild(input: RunBuildInput): Promise<RunBuildResult> {
 
   let html = entry.content
   try {
-    const providerConfig = decryptAiProviderConfig((await cookies()).get(AI_PROVIDER_COOKIE)?.value)
+    const providerConfig = decryptAiProviderConfig((await cookies()).get(AI_PROVIDER_COOKIE)?.value, userId)
     const { text } = await generateText({
       model: generationModel(providerConfig, resolveModel(model)),
       system: componentMode ? 'You are Lotus, an expert React application builder. Generate one complete, accessible React component module for a secure browser preview. Return code only.' : SYSTEM_PROMPT,

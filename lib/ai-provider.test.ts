@@ -8,10 +8,11 @@ beforeEach(() => {
 describe('AI provider configuration', () => {
   it('encrypts provider keys at rest and restores valid settings', () => {
     const config = { provider: 'openai' as const, apiKey: 'sk-super-secret-key', model: 'gpt-4.1', baseURL: '' }
-    const encrypted = encryptAiProviderConfig(config)
+    const encrypted = encryptAiProviderConfig(config, 'user-1')
 
     expect(encrypted).not.toContain(config.apiKey)
-    expect(decryptAiProviderConfig(encrypted)).toEqual(config)
+    expect(decryptAiProviderConfig(encrypted, 'user-1')).toEqual(config)
+    expect(decryptAiProviderConfig(encrypted, 'user-2')).toEqual(defaultAiProviderConfig())
     expect(aiProviderStatus(config)).toMatchObject({ configured: true, keyHint: '••••-key' })
   })
 
@@ -22,6 +23,6 @@ describe('AI provider configuration', () => {
   })
 
   it('falls back safely when an encrypted cookie is malformed', () => {
-    expect(decryptAiProviderConfig('not-valid-ciphertext')).toEqual(defaultAiProviderConfig())
+    expect(decryptAiProviderConfig('not-valid-ciphertext', 'user-1')).toEqual(defaultAiProviderConfig())
   })
 })

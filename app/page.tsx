@@ -1,9 +1,13 @@
 import { getProjectDashboard } from '@/app/actions/projects'
 import { ProductShell } from '@/components/lotus/product-shell'
+import { getCurrentSession } from '@/lib/auth-session'
+import { redirect } from 'next/navigation'
 
 export const dynamic = 'force-dynamic'
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ section?: string }> }) {
+  const session = await getCurrentSession()
+  if (!session) redirect('/sign-in')
   const dashboard = await getProjectDashboard()
   const requestedSection = (await searchParams).section
   const initialSection = ['projects', 'templates', 'preview', 'deploy', 'settings'].includes(requestedSection ?? '')
@@ -14,7 +18,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ s
     <ProductShell
       initialProjects={dashboard.projects}
       initialSettings={dashboard.settings}
-      userName="Guest"
+      userName={session.user.name}
       initialSection={initialSection}
     />
   )

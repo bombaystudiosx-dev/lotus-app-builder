@@ -22,6 +22,7 @@ import { IntegrationSettings } from '@/components/lotus/integration-settings'
 import { MobileDeploymentSettings } from '@/components/lotus/mobile-deployment-settings'
 import { PROJECT_FRAMEWORKS, type ProjectFramework } from '@/lib/project-framework'
 import { TEMPLATE_CATALOG } from '@/lib/template-catalog'
+import { AuthSignOut } from '@/components/auth-sign-out'
 
 type DashboardProject = Pick<Project, 'id' | 'name' | 'status' | 'updatedAt'> & { framework: string }
 type DashboardSettings = Pick<UserSettings, 'theme' | 'editorFontSize' | 'autosaveInterval' | 'defaultDevice'>
@@ -136,7 +137,7 @@ function ProductSidebar({ section, userName, drawerOpen, onClose, onNavigate }: 
         {SECTIONS.slice(0, 4).map(item => <SidebarButton key={item.id} item={item} active={section === item.id} onNavigate={onNavigate}/>)}
       </nav>
       <nav className="mt-auto border-t border-[#eadfd8] pt-4 dark:border-white/10"><SidebarButton item={SECTIONS[4]} active={section === 'settings'} onNavigate={onNavigate}/></nav>
-      <div className="mt-4 flex items-center gap-3 rounded-xl border border-[#eadfd8] bg-white p-3 dark:border-white/10 dark:bg-white/5"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#ffc399] text-xs font-bold text-[#4d3426]">{userName.slice(0,2).toUpperCase()}</span><div className="min-w-0"><p className="truncate text-sm font-semibold">{userName}</p><p className="text-xs text-[#806b60] dark:text-[#bba99f]">Founder</p></div></div>
+      <div className="mt-4 flex items-center gap-3 rounded-xl border border-[#eadfd8] bg-white p-3 dark:border-white/10 dark:bg-white/5"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#ffc399] text-xs font-bold text-[#4d3426]">{userName.slice(0,2).toUpperCase()}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{userName}</p><p className="text-xs text-[#806b60] dark:text-[#bba99f]">Account owner</p></div><AuthSignOut compact/></div>
     </aside>
   </>
 }

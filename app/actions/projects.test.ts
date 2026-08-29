@@ -28,7 +28,6 @@ const mocks = vi.hoisted(() => ({
   updateFile: vi.fn(),
   trashFile: vi.fn(),
   restoreFile: vi.fn(),
-  guestUser: vi.fn(),
   cookieGet: vi.fn(),
   cookieSet: vi.fn(),
   cookieDelete: vi.fn(),
@@ -38,7 +37,6 @@ vi.mock('@/lib/auth', () => ({
   auth: { api: { getSession: mocks.session } },
 }))
 vi.mock('@/lib/db', () => ({ db: { insert: mocks.insert, select: mocks.select }, sqlite: {} }))
-vi.mock('@/lib/guest-workspace', () => ({ ensureGuestWorkspace: mocks.guestUser }))
 vi.mock('@/lib/projects', () => ({ createProjectService: vi.fn(() => ({
   listDashboard: mocks.listDashboard,
   getSettings: mocks.getSettings,
@@ -109,7 +107,6 @@ const specification = {
 beforeEach(() => {
   process.env.BETTER_AUTH_SECRET = 'test-secret-with-at-least-sixteen-characters'
   mocks.session.mockResolvedValue({ user: { id: 'user-a' } })
-  mocks.guestUser.mockReturnValue('user-a')
   mocks.cookieGet.mockReturnValue(undefined)
 })
 
@@ -263,12 +260,10 @@ describe('authenticated project and file actions', () => {
     await expect(createTemplateProjectAction('not-real')).rejects.toThrow('Template not found')
   })
 
-  it('uses the public guest workspace when the session is missing', async () => {
+  it('rejects workspace access when the session is missing', async () => {
     mocks.session.mockResolvedValue(null)
-    mocks.getSettings.mockResolvedValue({ theme: 'system' })
-
-    await expect(getUserSettings()).resolves.toEqual({ theme: 'system' })
-    expect(mocks.getSettings).toHaveBeenCalledWith('user-a')
+    await expect(getUserSettings()).rejects.toThrow('Authentication required')
+    expect(mocks.getSettings).not.toHaveBeenCalled()
   })
 })
 

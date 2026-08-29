@@ -95,6 +95,8 @@ describe('migrateDatabase', () => {
       ]),
     )
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'user_settings'").get()).toBeTruthy()
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'rateLimit'").get()).toBeTruthy()
+    expect(database.prepare("PRAGMA index_list('rateLimit')").all()).toContainEqual(expect.objectContaining({ name: 'rate_limit_key_idx', unique: 1 }))
   })
 
   it('can run repeatedly without changing the schema version', () => {

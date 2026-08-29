@@ -18,6 +18,7 @@ import { redactSensitiveValues } from "@/lib/safety";
 import Image from "next/image";
 import Link from "next/link";
 import { assembleStaticPreview, type PreviewDiagnostic } from "@/lib/preview-runtime";
+import { AuthSignOut } from "@/components/auth-sign-out";
 
 const logoLotus = "/logo_lotus.png";
 
@@ -621,8 +622,8 @@ export default function App({ initial }: LotusBuilderProps) {
         <nav className="mt-auto border-t border-[#eadfd8] pt-4"><Link href="/?section=settings" className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-[#5f4a3f] hover:bg-[#fff6f0]"><Settings size={19}/>Settings</Link></nav>
         <div className="mt-4 flex items-center gap-3 rounded-xl border border-[#eadfd8] bg-white px-3 py-3">
           <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#ffb887] text-sm font-semibold">{initial.userName.trim().slice(0,2).toUpperCase() || "DU"}</span>
-          <div className="min-w-0"><p className="truncate text-sm font-semibold">{initial.userName}</p><p className="text-xs text-[#806b60]">Founder</p></div>
-          <ChevronDown className="ml-auto -rotate-90" size={16}/>
+          <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{initial.userName}</p><p className="text-xs text-[#806b60]">Account owner</p></div>
+          <AuthSignOut compact/>
         </div>
       </aside>
 

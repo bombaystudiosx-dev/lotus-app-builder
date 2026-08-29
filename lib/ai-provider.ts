@@ -28,6 +28,11 @@ export const aiProviderSchema = z.object({
 export type AiProviderConfig = z.infer<typeof aiProviderSchema>
 export type AiProviderStatus = Omit<AiProviderConfig, 'apiKey'> & { configured: boolean; keyHint: string }
 
+const storedAiProviderSchema = z.object({
+  ownerId: z.string().min(1),
+  config: aiProviderSchema,
+})
+
 const DEFAULT_MODELS: Record<AiProviderConfig['provider'], string> = {
   vercel: 'anthropic/claude-sonnet-4.5',
   openai: 'gpt-4.1',
@@ -47,20 +52,21 @@ function encryptionKey() {
   return createHash('sha256').update(secret).digest()
 }
 
-export function encryptAiProviderConfig(input: AiProviderConfig) {
+export function encryptAiProviderConfig(input: AiProviderConfig, ownerId: string) {
   const iv = randomBytes(12)
   const cipher = createCipheriv('aes-256-gcm', encryptionKey(), iv)
-  const encrypted = Buffer.concat([cipher.update(JSON.stringify(input), 'utf8'), cipher.final()])
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify({ ownerId, config: input }), 'utf8'), cipher.final()])
   return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString('base64url')
 }
 
-export function decryptAiProviderConfig(value?: string): AiProviderConfig {
+export function decryptAiProviderConfig(value: string | undefined, ownerId: string): AiProviderConfig {
   if (!value) return defaultAiProviderConfig()
   try {
     const payload = Buffer.from(value, 'base64url')
     const decipher = createDecipheriv('aes-256-gcm', encryptionKey(), payload.subarray(0, 12))
     decipher.setAuthTag(payload.subarray(12, 28))
-    return aiProviderSchema.parse(JSON.parse(Buffer.concat([decipher.update(payload.subarray(28)), decipher.final()]).toString('utf8')))
+    const stored = storedAiProviderSchema.parse(JSON.parse(Buffer.concat([decipher.update(payload.subarray(28)), decipher.final()]).toString('utf8')))
+    return stored.ownerId === ownerId ? stored.config : defaultAiProviderConfig()
   } catch {
     return defaultAiProviderConfig()
   }
