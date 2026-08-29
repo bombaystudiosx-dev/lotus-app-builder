@@ -1,0 +1,33 @@
+export type StarterTemplate = {
+  id: string
+  title: string
+  category: string
+  framework: 'Static HTML'
+  description: string
+  image: string
+  imageAlt: string
+  sourceUrl: string
+  eyebrow: string
+  headline: string
+  body: string
+  accent: string
+  dark: string
+  cta: string
+  metrics: readonly [string, string, string]
+  features: readonly [string, string, string]
+}
+
+export const TEMPLATE_CATALOG: readonly StarterTemplate[] = [
+  { id: 'saas-starter', title: 'SaaS Starter', category: 'SaaS', framework: 'Static HTML', description: 'A polished product site with proof, feature cards, metrics, testimonials, and conversion sections.', image: '/templates/saas-starter.jpg', imageAlt: 'Product team working together in a bright office', sourceUrl: 'https://unsplash.com/photos/bzdhc5b3Bxs', eyebrow: 'One workspace. Zero busywork.', headline: 'Move ambitious work forward', body: 'Plan, ship, and learn in one calm workspace designed for modern product teams.', accent: '#f27649', dark: '#17211d', cta: 'Start free', metrics: ['38% faster shipping', '12k active teams', '4.9 customer rating'], features: ['Smart project views', 'Live team signals', 'Automated reports'] },
+  { id: 'commerce-store', title: 'Commerce Store', category: 'E-Commerce', framework: 'Static HTML', description: 'An editorial storefront with collection storytelling, product highlights, trust signals, and a strong cart path.', image: '/templates/commerce-store.jpg', imageAlt: 'Customer shopping online with a payment card', sourceUrl: 'https://unsplash.com/photos/wD1LRb9OeEo', eyebrow: 'The considered collection', headline: 'Everyday pieces, beautifully made', body: 'Timeless essentials selected for texture, utility, and the way real life is lived.', accent: '#ad6746', dark: '#28201a', cta: 'Shop the collection', metrics: ['Free delivery over $75', '30-day returns', '4.8 from 2,400 reviews'], features: ['New arrivals', 'Natural materials', 'Made to last'] },
+  { id: 'ai-assistant', title: 'AI Assistant', category: 'AI App', framework: 'Static HTML', description: 'A premium AI launch page with use cases, prompt examples, model benefits, and waitlist conversion.', image: '/templates/ai-assistant.jpg', imageAlt: 'Abstract portrait representing artificial intelligence', sourceUrl: 'https://unsplash.com/photos/2EJCSULRwC8', eyebrow: 'Your ideas, in motion', headline: 'Think bigger with an AI creative partner', body: 'Turn rough thoughts into clear writing, useful plans, and finished work without losing your voice.', accent: '#8f6cff', dark: '#171525', cta: 'Try a prompt', metrics: ['10x faster drafts', '40+ workflows', 'Private by default'], features: ['Write and refine', 'Research with context', 'Build repeatable workflows'] },
+  { id: 'analytics-dashboard', title: 'Analytics Dashboard', category: 'Dashboard', framework: 'Static HTML', description: 'A data product landing page with executive metrics, reporting benefits, integrations, and social proof.', image: '/templates/analytics-dashboard.jpg', imageAlt: 'Analytics dashboard displayed on a laptop screen', sourceUrl: 'https://unsplash.com/photos/hpjSkU2UYSU', eyebrow: 'Clarity for every decision', headline: 'See what is working, right now', body: 'Bring revenue, product, and customer signals together in one trustworthy operating view.', accent: '#2d8b75', dark: '#10231f', cta: 'Explore analytics', metrics: ['120+ connectors', '99.99% uptime', '6 min to first insight'], features: ['Live performance', 'Shareable reports', 'Anomaly alerts'] },
+  { id: 'restaurant', title: 'Restaurant & Dining', category: 'Landing Page', framework: 'Static HTML', description: 'A complete hospitality site with an immersive menu story, chef section, reviews, hours, and reservations.', image: '/templates/restaurant.jpg', imageAlt: 'Beautifully plated meal on a restaurant table', sourceUrl: 'https://unsplash.com/photos/IkudayAogkM', eyebrow: 'Seasonal dining in the city', headline: 'A table worth remembering', body: 'Ingredient-led plates, warm hospitality, and evenings made to unfold slowly.', accent: '#c87548', dark: '#241a14', cta: 'Reserve a table', metrics: ['Open Tue–Sun', 'Locally sourced', 'Private dining'], features: ['Seasonal tasting menu', 'Wine pairings', 'Chef-led events'] },
+  { id: 'portfolio-studio', title: 'Creative Portfolio', category: 'Portfolio', framework: 'Static HTML', description: 'A spacious studio portfolio with featured work, services, process, client proof, and a project inquiry path.', image: '/templates/portfolio-studio.jpg', imageAlt: 'Warm modern interior designed by a creative studio', sourceUrl: 'https://unsplash.com/photos/L7EwHkq1B2s', eyebrow: 'Independent design practice', headline: 'Spaces with soul and staying power', body: 'We shape thoughtful interiors where material, light, and daily rituals feel completely at home.', accent: '#a56443', dark: '#211b17', cta: 'View selected work', metrics: ['18 design awards', '32 spaces completed', '9 cities'], features: ['Interior direction', 'Spatial identity', 'Furniture curation'] },
+  { id: 'travel-marketplace', title: 'Travel Marketplace', category: 'Marketplace', framework: 'Static HTML', description: 'A destination marketplace with search, curated stays, local experiences, trust content, and member conversion.', image: '/templates/travel-marketplace.jpg', imageAlt: 'Turquoise water and a white sand beach', sourceUrl: 'https://unsplash.com/photos/KMn4VEeEPR8', eyebrow: 'Go somewhere unforgettable', headline: 'Find the stay that changes the trip', body: 'Handpicked places, local hosts, and remarkable experiences without the endless tabs.', accent: '#147d92', dark: '#10252a', cta: 'Explore stays', metrics: ['1,800+ stays', '72 destinations', '24/7 trip support'], features: ['Curated homes', 'Local experiences', 'Flexible booking'] },
+  { id: 'wellness-app', title: 'Wellness Mobile App', category: 'Mobile App', framework: 'Static HTML', description: 'A mobile-product launch page with app previews, habit benefits, member stories, and download conversion.', image: '/templates/wellness-app.jpg', imageAlt: 'Person practicing yoga in a peaceful studio', sourceUrl: 'https://unsplash.com/photos/NTyBbu66_SI', eyebrow: 'A calmer rhythm, every day', headline: 'Wellness that fits real life', body: 'Short guided practices, gentle habit tracking, and support that meets you where you are.', accent: '#6b8f71', dark: '#17241b', cta: 'Get the app', metrics: ['5–20 min sessions', '4.9 app rating', '850k mindful minutes'], features: ['Daily movement', 'Guided breathing', 'Progress without pressure'] },
+] as const
+
+export function getStarterTemplate(templateId: string) {
+  return TEMPLATE_CATALOG.find((template) => template.id === templateId)
+}

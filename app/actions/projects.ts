@@ -17,6 +17,10 @@ import { AI_PROVIDER_COOKIE, aiProviderSchema, aiProviderStatus, decryptAiProvid
 import { createIntegrationSessionToken, disconnectIntegration, listIntegrationStatuses, parseIntegrationSessionToken, saveIntegrationConnection, type IntegrationConnectionStatus, type IntegrationProvider } from '@/lib/integration-connections'
 import { getMobileDeploymentConfig, saveMobileDeploymentConfig, type MobileDeploymentConfig } from '@/lib/mobile-deployment'
 import { createProjectInputSchema } from '@/lib/project-framework'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { getStarterTemplate } from '@/lib/template-catalog'
+import { renderStarterTemplate } from '@/lib/template-html'
 
 const INTEGRATION_SESSION_COOKIE = 'lotus-integration-session'
 
@@ -193,23 +197,18 @@ export async function createBlankProjectAction(input?: unknown) {
   return created
 }
 
-const STARTER_TEMPLATES = {
-  'saas-starter': { name: 'SaaS Starter', eyebrow: 'Workspace', title: 'Build your next product', body: 'A focused SaaS foundation with navigation, metrics, and a clear upgrade path.', accent: '#f29a70' },
-  'commerce-store': { name: 'Commerce Store', eyebrow: 'New collection', title: 'Everyday objects, refined', body: 'A responsive storefront foundation with a merchandising grid and conversion-ready calls to action.', accent: '#b87850' },
-  'ai-assistant': { name: 'AI Assistant', eyebrow: 'Intelligent workspace', title: 'Ask, create, refine', body: 'A calm AI product shell with prompts, recent work, and a production-ready responsive layout.', accent: '#d79368' },
-  'analytics-dashboard': { name: 'Analytics Dashboard', eyebrow: 'This week', title: 'Performance at a glance', body: 'A clean analytics foundation for product metrics, activity, and operational reporting.', accent: '#c6865e' },
-} as const
-
 export async function createTemplateProjectAction(templateId: string) {
-  const template = STARTER_TEMPLATES[templateId as keyof typeof STARTER_TEMPLATES]
+  const template = getStarterTemplate(templateId)
   if (!template) throw new Error('Template not found.')
+  const imagePath = template.image.replace(/^\//, '')
+  const imageBase64 = (await readFile(join(process.cwd(), 'public', imagePath))).toString('base64')
   const userId = await getUserId()
-  const created = await projects.createBlank(userId, template.name)
+  const created = await projects.createBlank(userId, template.title, 'static')
   const runtime = await projects.getRuntime(userId, created.id)
   const entry = runtime ? await projects.getFileByPath(userId, created.id, runtime.entryPath) : null
   if (!entry) throw new Error('Template project entry file is unavailable.')
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${template.name}</title><style>*{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui;background:#fffaf7;color:#261c17}nav{height:72px;display:flex;align-items:center;justify-content:space-between;padding:0 clamp(24px,7vw,96px);border-bottom:1px solid #eee1d9}.brand{font-family:Georgia,serif;font-size:24px;color:#9f612a}.button{display:inline-flex;padding:12px 18px;border-radius:12px;background:${template.accent};color:white;text-decoration:none;font-weight:700}.hero{min-height:calc(100vh - 72px);display:grid;place-items:center;padding:64px 24px;background:radial-gradient(circle at 70% 20%,#ffe3d2,transparent 35%),#fffaf7}.content{max-width:760px;text-align:center}.eyebrow{color:${template.accent};font-size:13px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}h1{font-size:clamp(42px,8vw,82px);line-height:.98;margin:20px 0;letter-spacing:-.055em}p{max-width:620px;margin:0 auto 30px;color:#735f54;font-size:clamp(17px,2vw,21px);line-height:1.6}</style></head><body><nav><span class="brand">${template.name}</span><a class="button" href="#start">Get started</a></nav><main class="hero"><div class="content"><div class="eyebrow">${template.eyebrow}</div><h1>${template.title}</h1><p>${template.body}</p><a id="start" class="button" href="#">Start building</a></div></main></body></html>`
-  await projects.updateFile(userId, created.id, entry.id, { content: html, expectedUpdatedAt: entry.updatedAt })
+  await projects.createFile(userId, created.id, { path: 'assets/hero.jpg', content: imageBase64 })
+  await projects.updateFile(userId, created.id, entry.id, { content: renderStarterTemplate(template), expectedUpdatedAt: entry.updatedAt })
   refreshProjectViews(created.id)
   return created
 }

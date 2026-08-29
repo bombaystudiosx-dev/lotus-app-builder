@@ -251,9 +251,13 @@ describe('authenticated project and file actions', () => {
     mocks.getFileByPath.mockResolvedValue(templateEntry)
 
     await expect(createTemplateProjectAction('saas-starter')).resolves.toMatchObject({ id: 'template-project' })
-    expect(mocks.createBlank).toHaveBeenCalledWith('user-a', 'SaaS Starter')
+    expect(mocks.createBlank).toHaveBeenCalledWith('user-a', 'SaaS Starter', 'static')
+    expect(mocks.createFile).toHaveBeenCalledWith('user-a', 'template-project', expect.objectContaining({
+      path: 'assets/hero.jpg',
+      content: expect.stringMatching(/^[A-Za-z0-9+/=]+$/),
+    }))
     expect(mocks.updateFile).toHaveBeenCalledWith('user-a', 'template-project', 'template-entry', expect.objectContaining({
-      content: expect.stringContaining('Build your next product'),
+      content: expect.stringContaining('Move ambitious work forward'),
       expectedUpdatedAt: templateEntry.updatedAt,
     }))
     await expect(createTemplateProjectAction('not-real')).rejects.toThrow('Template not found')
