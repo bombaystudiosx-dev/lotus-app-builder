@@ -13,7 +13,7 @@ import { assembleStaticPreview, type PreviewBuild } from '@/lib/preview-runtime'
 import type { ProjectSpecification } from '@/lib/project-specification'
 import { cookies } from 'next/headers'
 import { AI_PROVIDER_COOKIE, aiProviderSchema, aiProviderStatus, decryptAiProviderConfig, defaultAiProviderConfig, encryptAiProviderConfig, generationModel, type AiProviderStatus } from '@/lib/ai-provider'
-import { disconnectIntegration, listIntegrationStatuses, saveIntegrationConnection, type IntegrationConnectionStatus, type IntegrationProvider } from '@/lib/integration-connections'
+import { disconnectIntegration, getStoredIntegration, listIntegrationStatuses, saveIntegrationConnection, type IntegrationConnectionStatus, type IntegrationProvider } from '@/lib/integration-connections'
 import { getMobileDeploymentConfig, saveMobileDeploymentConfig, type MobileDeploymentConfig } from '@/lib/mobile-deployment'
 import { createProjectInputSchema } from '@/lib/project-framework'
 import { readFile } from 'node:fs/promises'
@@ -21,6 +21,7 @@ import { join } from 'node:path'
 import { getStarterTemplate } from '@/lib/template-catalog'
 import { renderStarterTemplate } from '@/lib/template-html'
 import { requireCurrentUser } from '@/lib/auth-session'
+import { downloadGitHubRepository, listGitHubBranches, listGitHubRepositories, type GitHubBranch, type GitHubRepository } from '@/lib/github-import'
 
 async function getUserId() {
   return (await requireCurrentUser()).id
@@ -145,6 +146,61 @@ export async function disconnectIntegrationAction(provider: IntegrationProvider)
   const status = await disconnectIntegration(await getIntegrationUserId(), provider)
   refreshProjectViews()
   return status
+}
+
+async function githubConnection(userId: string) {
+  if (!usePostgres) throw new Error('Persistent GitHub connections are not configured.')
+  const connection = await getStoredIntegration(userId, 'github')
+  if (!connection || connection.provider !== 'github') throw new Error('Connect GitHub in Settings before importing a repository.')
+  return connection.token
+}
+
+function githubActionError(error: unknown) {
+  const message = error instanceof Error ? error.message : ''
+  return /GitHub|repository|branch|supported text files|project size|file is too large|safe relative path/i.test(message)
+    ? message
+    : 'GitHub could not complete that request.'
+}
+
+export async function listGitHubRepositoriesAction(): Promise<{ ok: true; repositories: GitHubRepository[] } | { ok: false; error: string }> {
+  try {
+    const userId = await getUserId()
+    return { ok: true, repositories: await listGitHubRepositories(await githubConnection(userId)) }
+  } catch (error) { return { ok: false, error: githubActionError(error) } }
+}
+
+export async function listGitHubBranchesAction(repository: string): Promise<{ ok: true; branches: GitHubBranch[] } | { ok: false; error: string }> {
+  try {
+    const userId = await getUserId()
+    return { ok: true, branches: await listGitHubBranches(await githubConnection(userId), repository) }
+  } catch (error) { return { ok: false, error: githubActionError(error) } }
+}
+
+export async function importGitHubRepositoryAction(input: unknown) {
+  let created: Awaited<ReturnType<typeof projects.createBlank>> | undefined
+  try {
+    const userId = await getUserId()
+    const snapshot = await downloadGitHubRepository(await githubConnection(userId), input)
+    const name = snapshot.repository.split('/').at(-1) ?? 'Imported project'
+    created = await projects.createBlank(userId, name, snapshot.framework)
+    const starterFiles = await projects.listFiles(userId, created.id)
+    for (const file of starterFiles) {
+      const trashed = await projects.trashFile(userId, created.id, file.id)
+      await projects.permanentlyDeleteFile(userId, created.id, trashed.id)
+    }
+    for (const file of snapshot.files) await projects.createFile(userId, created.id, file)
+    refreshProjectViews(created.id)
+    return { ok: true as const, project: created, importedFiles: snapshot.files.length, skippedFiles: snapshot.skippedFiles, framework: snapshot.framework }
+  } catch (error) {
+    if (created) {
+      try {
+        const userId = await getUserId()
+        await projects.softDelete(userId, created.id)
+        await projects.permanentlyDelete(userId, created.id)
+      } catch { /* Preserve the original import failure. */ }
+    }
+    return { ok: false as const, error: githubActionError(error) }
+  }
 }
 
 export async function getMobileDeploymentConfigAction(projectId: string): Promise<MobileDeploymentConfig> {

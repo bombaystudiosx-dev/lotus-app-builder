@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ArrowUpRight, ChevronRight, CircleDot, Eye, Folder,
-  Grid2X2, KeyRound, LayoutGrid, List, Menu, Monitor, Moon, MoreHorizontal, Plus,
+  GitFork, Grid2X2, KeyRound, LayoutGrid, List, Menu, Monitor, Moon, MoreHorizontal, Plus,
   Rocket, Search, Settings, Smartphone, Sun, X,
 } from 'lucide-react'
 import type { Project, UserSettings } from '@/lib/db/schema'
@@ -23,6 +23,7 @@ import { MobileDeploymentSettings } from '@/components/lotus/mobile-deployment-s
 import { PROJECT_FRAMEWORKS, type ProjectFramework } from '@/lib/project-framework'
 import { TEMPLATE_CATALOG } from '@/lib/template-catalog'
 import { AuthSignOut } from '@/components/auth-sign-out'
+import { GitHubImportDialog } from '@/components/lotus/github-import-dialog'
 
 type DashboardProject = Pick<Project, 'id' | 'name' | 'status' | 'updatedAt'> & { framework: string }
 type DashboardSettings = Pick<UserSettings, 'theme' | 'editorFontSize' | 'autosaveInterval' | 'defaultDevice'>
@@ -61,6 +62,7 @@ export function ProductShell({ initialProjects, initialSettings, userName, initi
   const [settings, setSettings] = useState(initialSettings)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [newProjectOpen, setNewProjectOpen] = useState(false)
+  const [githubImportOpen, setGitHubImportOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
   const resolvedTheme = useResolvedTheme(settings.theme)
@@ -100,7 +102,7 @@ export function ProductShell({ initialProjects, initialSettings, userName, initi
       </header>
       <main className="px-4 py-6 sm:px-7 lg:px-10 lg:py-9">
         {error && <div role="alert" className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-        {section === 'projects' && <ProjectsWorkspace projects={projects} pending={pending} onCreate={() => setNewProjectOpen(true)} onError={setError} onRefresh={() => router.refresh()} run={run}/>}
+        {section === 'projects' && <ProjectsWorkspace projects={projects} pending={pending} onCreate={() => setNewProjectOpen(true)} onImport={() => setGitHubImportOpen(true)} onError={setError} onRefresh={() => router.refresh()} run={run}/>}
         {section === 'templates' && <TemplatesWorkspace pending={pending} run={run} router={router}/>}
         {section === 'preview' && <DedicatedPreview projects={projects.filter(project => project.status === 'active')}/>}
         {section === 'deploy' && <DeployWorkspace projects={projects.filter(project => project.status === 'active')}/>}
@@ -108,6 +110,7 @@ export function ProductShell({ initialProjects, initialSettings, userName, initi
       </main>
     </div>
     {newProjectOpen && <NewProjectDialog pending={pending} onClose={() => setNewProjectOpen(false)} onCreate={createProject}/>}
+    {githubImportOpen && <GitHubImportDialog onClose={() => setGitHubImportOpen(false)}/>}
   </div>
 }
 
@@ -151,14 +154,14 @@ function WorkspaceHeader({ title, subtitle, actions }: { title: string; subtitle
   return <div className="flex flex-wrap items-end justify-between gap-4"><div><h1 className="text-3xl font-bold tracking-tight sm:text-4xl">{title}</h1><p className="mt-2 text-sm text-[#806b60] sm:text-base dark:text-[#bba99f]">{subtitle}</p></div>{actions}</div>
 }
 
-function ProjectsWorkspace({ projects, pending, onCreate, onError, onRefresh, run }: { projects: DashboardProject[]; pending: boolean; onCreate: () => void; onError: (error: string | null) => void; onRefresh: () => void; run: (action: () => Promise<void>) => void }) {
+function ProjectsWorkspace({ projects, pending, onCreate, onImport, onError, onRefresh, run }: { projects: DashboardProject[]; pending: boolean; onCreate: () => void; onImport: () => void; onError: (error: string | null) => void; onRefresh: () => void; run: (action: () => Promise<void>) => void }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('active')
   const [sort, setSort] = useState('updated')
   const [layout, setLayout] = useState<'grid' | 'list'>('grid')
   const visible = useMemo(() => projects.filter(item => (status === 'all' || item.status === status) && item.name.toLowerCase().includes(query.toLowerCase())).sort((a,b) => sort === 'name' ? a.name.localeCompare(b.name) : +new Date(b.updatedAt) - +new Date(a.updatedAt)), [projects, query, sort, status])
   return <>
-    <WorkspaceHeader title="Projects" subtitle="Build, manage, and continue working on your apps." actions={<button type="button" onClick={onCreate} disabled={pending} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#e98b66] px-4 text-sm font-semibold text-white disabled:opacity-60"><Plus size={17}/>{pending ? 'Creating…' : 'New Project'}</button>}/>
+    <WorkspaceHeader title="Projects" subtitle="Build, manage, and continue working on your apps." actions={<div className="flex flex-wrap gap-2"><button type="button" onClick={onImport} disabled={pending} className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#eadfd8] bg-white px-4 text-sm font-semibold disabled:opacity-60 dark:border-white/10 dark:bg-white/5"><GitFork size={17}/>Import GitHub</button><button type="button" onClick={onCreate} disabled={pending} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#e98b66] px-4 text-sm font-semibold text-white disabled:opacity-60"><Plus size={17}/>{pending ? 'Creating…' : 'New Project'}</button></div>}/>
     <div className="mt-7 flex flex-wrap gap-2"><label className="flex min-w-[220px] flex-1 items-center gap-2 rounded-xl border border-[#eadfd8] bg-white px-3 dark:border-white/10 dark:bg-white/5"><Search size={16}/><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search projects" className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none"/></label><select aria-label="Filter projects" value={status} onChange={event => setStatus(event.target.value)} className="rounded-xl border border-[#eadfd8] bg-white px-3 text-sm dark:border-white/10 dark:bg-[#211b18]"><option value="active">Active</option><option value="archived">Archived</option><option value="trashed">Trash</option><option value="all">All statuses</option></select><select aria-label="Sort projects" value={sort} onChange={event => setSort(event.target.value)} className="rounded-xl border border-[#eadfd8] bg-white px-3 text-sm dark:border-white/10 dark:bg-[#211b18]"><option value="updated">Recently updated</option><option value="name">Name</option></select><div className="flex rounded-xl border border-[#eadfd8] bg-white p-1 dark:border-white/10 dark:bg-white/5"><button type="button" onClick={() => setLayout('grid')} aria-label="Grid view" aria-pressed={layout === 'grid'} className="rounded-lg p-2 aria-pressed:bg-[#fff0e5] dark:aria-pressed:bg-white/10"><LayoutGrid size={16}/></button><button type="button" onClick={() => setLayout('list')} aria-label="List view" aria-pressed={layout === 'list'} className="rounded-lg p-2 aria-pressed:bg-[#fff0e5] dark:aria-pressed:bg-white/10"><List size={16}/></button></div></div>
     {visible.length === 0 ? <EmptyState title="No matching projects" body="Create a new project or change the current search and filters." action="New Project" onAction={onCreate}/> : <div className={`mt-6 ${layout === 'grid' ? 'grid gap-4 md:grid-cols-2 xl:grid-cols-3' : 'grid gap-2'}`}>{visible.map(item => <ProjectCard key={item.id} item={item} compact={layout === 'list'} pending={pending} onError={onError} onRefresh={onRefresh} run={run}/>)}</div>}
   </>
